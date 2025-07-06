@@ -37,3 +37,37 @@ coverage/
 # Temporary files
 tmp/
 temp/
+
+img/
+
+# MCP configuration files
+.mcp.json
+.mcp-*.json
+
+# Sessions
+sessions/
+
+# Test files
+test-*.js
+test-*.mjs
+test-*.py
+test-*.sh
+test-*.json
+test-*.log
+quick-test.sh
+stop-server.sh
+view-logs.sh
+diagnose-*.js
+diagnose-*.mjs
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.backup
+
+# Generated files
+*.js
+*.js.map
+*.d.ts
+!examples/*.mjs
