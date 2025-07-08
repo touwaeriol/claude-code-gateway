@@ -3,6 +3,63 @@ import { SDKMessage } from '../types/claude';
 
 export class MessageConverter {
   /**
+   * 构建 prompt（简化版本，不包含会话ID和工具定义）
+   */
+  buildPrompt(messages: ChatMessage[]): string {
+    let prompt = '';
+    
+    // 处理对话历史
+    for (const msg of messages) {
+      switch (msg.role) {
+        case 'user':
+          if (msg.content !== null && msg.content !== undefined) {
+            const userContent = typeof msg.content === 'string' 
+              ? msg.content 
+              : JSON.stringify(msg.content);
+            prompt += `Human: ${userContent}\n\n`;
+          } else {
+            prompt += `Human: \n\n`;
+          }
+          break;
+          
+        case 'assistant':
+          if (msg.content) {
+            const assistantContent = typeof msg.content === 'string' 
+              ? msg.content 
+              : JSON.stringify(msg.content);
+            prompt += `Assistant: ${assistantContent}\n\n`;
+          }
+          
+          // 处理工具调用
+          if (msg.tool_calls) {
+            for (const toolCall of msg.tool_calls) {
+              prompt += `Assistant: I'll use the ${toolCall.function.name} tool.\n\n`;
+              prompt += `Tool Use (${toolCall.id}): ${toolCall.function.name}\n`;
+              prompt += `Arguments: ${toolCall.function.arguments}\n\n`;
+            }
+          }
+          break;
+          
+        case 'tool':
+          if (msg.content !== null && msg.content !== undefined) {
+            const toolContent = typeof msg.content === 'string' 
+              ? msg.content 
+              : JSON.stringify(msg.content);
+            prompt += `Tool Result (${msg.tool_call_id}): ${toolContent}\n\n`;
+          } else {
+            prompt += `Tool Result (${msg.tool_call_id}): \n\n`;
+          }
+          break;
+      }
+    }
+    
+    // 添加 Assistant 前缀
+    prompt += "Assistant: ";
+    
+    return prompt;
+  }
+
+  /**
    * 将 OpenAI 消息转换为 Claude prompt
    */
   buildClaudePrompt(messages: ChatMessage[], sessionId: string, tools?: Tool[]): string {

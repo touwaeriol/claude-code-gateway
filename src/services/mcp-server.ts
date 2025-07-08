@@ -2,10 +2,11 @@ import { Request, Response } from 'express';
 import { SessionManager } from './session-manager';
 import { PermissionController } from './permission-controller';
 import { MCPGateway } from './mcp-gateway';
+import { ToolManager } from './tool-manager';
 
 interface JsonRpcRequest {
   jsonrpc: string;
-  id: number | string;
+  id?: number | string;  // id 是可选的，通知类型的请求没有 id
   method: string;
   params?: any;
 }
@@ -25,7 +26,8 @@ export class MCPServer {
   constructor(
     private sessionManager: SessionManager,
     private permissionController: PermissionController,
-    private mcpGateway: MCPGateway
+    private mcpGateway: MCPGateway,
+    private toolManager: ToolManager
   ) {}
 
   /**
@@ -70,7 +72,7 @@ export class MCPServer {
         default:
           response = {
             jsonrpc: '2.0',
-            id: request.id,
+            id: request.id!,  // 使用非空断言，因为这里肯定有 id
             error: {
               code: -32601,
               message: `Method '${request.method}' not found`
@@ -86,7 +88,7 @@ export class MCPServer {
       
       res.json({
         jsonrpc: '2.0',
-        id: request.id,
+        id: request.id!,
         error: {
           code: -32603,
           message: 'Internal error',
@@ -102,7 +104,7 @@ export class MCPServer {
   private async handleInitialize(request: JsonRpcRequest, serverType: string): Promise<JsonRpcResponse> {
     return {
       jsonrpc: '2.0',
-      id: request.id,
+      id: request.id!,
       result: {
         protocolVersion: '2025-06-18',
         capabilities: {
@@ -131,7 +133,7 @@ export class MCPServer {
     
     return {
       jsonrpc: '2.0',
-      id: request.id,
+      id: request.id!,
       result: null
     };
   }
@@ -148,7 +150,7 @@ export class MCPServer {
       // 权限服务器只提供一个权限检查工具
       return {
         jsonrpc: '2.0',
-        id: request.id,
+        id: request.id!,
         result: {
           tools: [{
             name: 'approval_prompt',
@@ -172,79 +174,18 @@ export class MCPServer {
         }
       };
     } else {
-      // 网关服务器提供会话允许的工具
-      const session = this.sessionManager.getSession(sessionId);
-      const allowedTools = session?.allowedTools || [];
+      // 网关服务器提供会话对应的工具列表
+      // 从 ToolManager 获取会话的 MCP 工具定义
+      const tools = this.toolManager.getSessionMCPTools(sessionId);
       
-      const tools = [];
-      
-      // 如果允许 calculate
-      if (allowedTools.includes('mcp__gateway__calculate')) {
-        tools.push({
-          name: 'calculate',
-          description: 'Perform mathematical calculations',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              expression: {
-                type: 'string',
-                description: 'Mathematical expression to evaluate'
-              }
-            },
-            required: ['expression']
-          }
-        });
-      }
-      
-      // 如果允许 search
-      if (allowedTools.includes('mcp__gateway__search')) {
-        tools.push({
-          name: 'search',
-          description: 'Search for information',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              query: {
-                type: 'string',
-                description: 'Search query'
-              },
-              limit: {
-                type: 'number',
-                description: 'Number of results to return',
-                default: 5
-              }
-            },
-            required: ['query']
-          }
-        });
-      }
-      
-      // 如果允许 get_weather
-      if (allowedTools.includes('mcp__gateway__get_weather')) {
-        tools.push({
-          name: 'get_weather',
-          description: 'Get weather information',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              location: {
-                type: 'string',
-                description: 'Location to get weather for'
-              },
-              units: {
-                type: 'string',
-                enum: ['celsius', 'fahrenheit'],
-                default: 'celsius'
-              }
-            },
-            required: ['location']
-          }
-        });
+      console.log(`MCP Gateway tools/list - sessionId: ${sessionId}, tools count: ${tools.length}`);
+      if (tools.length > 0) {
+        console.log('工具列表:', tools.map(t => t.name).join(', '));
       }
       
       return {
         jsonrpc: '2.0',
-        id: request.id,
+        id: request.id!,
         result: { tools }
       };
     }
@@ -259,6 +200,7 @@ export class MCPServer {
     sessionId: string
   ): Promise<JsonRpcResponse> {
     const { name, arguments: args } = request.params;
+    const toolCallId = String(request.id); // 使用 JSON-RPC 请求 ID
 
     if (serverType === 'permission') {
       // 处理权限请求
@@ -287,7 +229,7 @@ export class MCPServer {
         
         return {
           jsonrpc: '2.0',
-          id: request.id,
+          id: request.id!,
           result: {
             content: [
               {
@@ -300,12 +242,12 @@ export class MCPServer {
       }
     } else {
       // 处理网关工具调用
-      const result = await this.mcpGateway.handleToolCall(name, args, sessionId);
+      const result = await this.mcpGateway.handleToolCall(name, args, sessionId, toolCallId);
       
       if (result.success) {
         return {
           jsonrpc: '2.0',
-          id: request.id,
+          id: request.id!,
           result: {
             content: [
               {
@@ -318,7 +260,7 @@ export class MCPServer {
       } else {
         return {
           jsonrpc: '2.0',
-          id: request.id,
+          id: request.id!,
           error: {
             code: -32000,
             message: result.error || 'Tool execution failed'
@@ -329,7 +271,7 @@ export class MCPServer {
 
     return {
       jsonrpc: '2.0',
-      id: request.id,
+      id: request.id!,
       error: {
         code: -32601,
         message: `Tool '${name}' not found`

@@ -1,142 +1,201 @@
 import { Tool } from '../types/openai';
+import { createHash } from 'crypto';
 
-export interface ToolMapping {
-  openaiName: string;
-  mcpName: string;
+export interface SessionTools {
+  sessionId: string;
+  tools: Tool[];
+  signature: string;
+  createdAt: Date;
+  expiresAt: Date;
+}
+
+export interface MCPToolDefinition {
+  name: string;
   description: string;
-  handler?: (args: any) => Promise<any>;
+  inputSchema: any;
 }
 
 export class ToolManager {
-  private toolMappings: Map<string, ToolMapping> = new Map();
-
-  constructor() {
-    this.registerDefaultTools();
-  }
-
-  /**
-   * 注册默认工具
-   */
-  private registerDefaultTools(): void {
-    // 计算工具
-    this.registerTool({
-      openaiName: 'calculate',
-      mcpName: 'mcp__gateway__calculate',
-      description: '执行数学计算'
-    });
-
-    // 搜索工具
-    this.registerTool({
-      openaiName: 'search',
-      mcpName: 'mcp__gateway__search',
-      description: '搜索信息'
-    });
-
-    // 天气工具
-    this.registerTool({
-      openaiName: 'get_weather',
-      mcpName: 'mcp__gateway__get_weather',
-      description: '获取天气信息'
-    });
-  }
+  // 会话工具缓存 - 使用签名作为键
+  private sessionToolsCache = new Map<string, SessionTools>();
+  // 会话ID到签名的映射
+  private sessionToSignature = new Map<string, string>();
+  // 缓存时间（默认5分钟）
+  private readonly cacheTimeout = 5 * 60 * 1000;
 
   /**
-   * 注册工具
+   * 为会话注册工具列表
    */
-  registerTool(mapping: ToolMapping): void {
-    this.toolMappings.set(mapping.openaiName, mapping);
-  }
-
-  /**
-   * 获取 MCP 工具名称
-   */
-  getMCPToolName(openaiName: string): string {
-    const mapping = this.toolMappings.get(openaiName);
-    return mapping?.mcpName || `mcp__gateway__${openaiName}`;
-  }
-
-  /**
-   * 获取 OpenAI 工具名称
-   */
-  getOpenAIToolName(mcpName: string): string {
-    // 移除 mcp__gateway__ 前缀
-    const defaultName = mcpName.replace(/^mcp__gateway__/, '');
+  registerSessionTools(sessionId: string, tools: Tool[]): string {
+    // 生成工具列表的签名
+    const signature = this.generateToolsSignature(tools);
     
-    // 查找映射
-    for (const [openaiName, mapping] of this.toolMappings.entries()) {
-      if (mapping.mcpName === mcpName) {
-        return openaiName;
+    // 检查是否已有相同签名的缓存
+    const existing = this.sessionToolsCache.get(signature);
+    if (existing && existing.expiresAt > new Date()) {
+      // 更新会话映射
+      this.sessionToSignature.set(sessionId, signature);
+      return signature;
+    }
+
+    // 创建新的缓存条目
+    const sessionTools: SessionTools = {
+      sessionId,
+      tools,
+      signature,
+      createdAt: new Date(),
+      expiresAt: new Date(Date.now() + this.cacheTimeout)
+    };
+
+    this.sessionToolsCache.set(signature, sessionTools);
+    this.sessionToSignature.set(sessionId, signature);
+
+    // 清理过期的缓存
+    this.cleanupExpiredCache();
+
+    return signature;
+  }
+
+  /**
+   * 获取会话的工具列表
+   */
+  getSessionTools(sessionId: string): Tool[] {
+    const signature = this.sessionToSignature.get(sessionId);
+    if (!signature) {
+      return [];
+    }
+
+    const sessionTools = this.sessionToolsCache.get(signature);
+    if (!sessionTools || sessionTools.expiresAt < new Date()) {
+      // 缓存已过期
+      this.sessionToSignature.delete(sessionId);
+      if (sessionTools) {
+        this.sessionToolsCache.delete(signature);
+      }
+      return [];
+    }
+
+    return sessionTools.tools;
+  }
+
+  /**
+   * 将 OpenAI 工具转换为 MCP 工具定义
+   */
+  convertToMCPTools(tools: Tool[]): MCPToolDefinition[] {
+    return tools.map(tool => ({
+      name: tool.function.name,
+      description: tool.function.description || '',
+      inputSchema: tool.function.parameters || {
+        type: 'object',
+        properties: {},
+        required: []
+      }
+    }));
+  }
+
+  /**
+   * 获取会话的 MCP 工具列表
+   */
+  getSessionMCPTools(sessionId: string): MCPToolDefinition[] {
+    const tools = this.getSessionTools(sessionId);
+    return this.convertToMCPTools(tools);
+  }
+
+  /**
+   * 检查工具是否允许在会话中使用
+   */
+  isToolAllowed(sessionId: string, toolName: string): boolean {
+    const tools = this.getSessionTools(sessionId);
+    return tools.some(tool => tool.function.name === toolName);
+  }
+
+  /**
+   * 获取工具定义
+   */
+  getToolDefinition(sessionId: string, toolName: string): Tool | undefined {
+    const tools = this.getSessionTools(sessionId);
+    return tools.find(tool => tool.function.name === toolName);
+  }
+
+  /**
+   * 生成工具列表的签名
+   */
+  private generateToolsSignature(tools: Tool[]): string {
+    // 对工具列表进行规范化和排序，确保相同的工具列表产生相同的签名
+    const normalized = tools
+      .map(tool => ({
+        name: tool.function.name,
+        description: tool.function.description || '',
+        parameters: JSON.stringify(tool.function.parameters || {})
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    const content = JSON.stringify(normalized);
+    return createHash('sha256').update(content).digest('hex').substring(0, 16);
+  }
+
+  /**
+   * 清理过期的缓存
+   */
+  private cleanupExpiredCache(): void {
+    const now = new Date();
+    const expiredSignatures: string[] = [];
+
+    // 找出所有过期的缓存
+    for (const [signature, sessionTools] of this.sessionToolsCache.entries()) {
+      if (sessionTools.expiresAt < now) {
+        expiredSignatures.push(signature);
       }
     }
-    
-    return defaultName;
-  }
 
-  /**
-   * 验证工具参数
-   */
-  validateToolArgs(toolName: string, args: any, toolDefinition?: Tool): { valid: boolean; error?: string } {
-    if (!toolDefinition?.function?.parameters) {
-      return { valid: true };
-    }
-
-    const params = toolDefinition.function.parameters;
-    
-    // 检查必需参数
-    if (params.required && Array.isArray(params.required)) {
-      for (const required of params.required) {
-        if (!(required in args)) {
-          return { 
-            valid: false, 
-            error: `Missing required parameter: ${required}` 
-          };
+    // 删除过期的缓存
+    for (const signature of expiredSignatures) {
+      this.sessionToolsCache.delete(signature);
+      
+      // 清理会话映射
+      for (const [sessionId, sig] of this.sessionToSignature.entries()) {
+        if (sig === signature) {
+          this.sessionToSignature.delete(sessionId);
         }
       }
     }
-
-    // 检查参数类型（简化版本）
-    if (params.properties) {
-      for (const [key, schema] of Object.entries(params.properties)) {
-        if (key in args && schema && typeof schema === 'object' && 'type' in schema) {
-          const expectedType = schema.type;
-          const actualType = typeof args[key];
-          
-          if (expectedType === 'string' && actualType !== 'string') {
-            return { 
-              valid: false, 
-              error: `Parameter ${key} must be a string` 
-            };
-          }
-          
-          if (expectedType === 'number' && actualType !== 'number') {
-            return { 
-              valid: false, 
-              error: `Parameter ${key} must be a number` 
-            };
-          }
-        }
-      }
-    }
-
-    return { valid: true };
   }
 
   /**
-   * 格式化工具调用结果
+   * 获取缓存统计信息
    */
-  formatToolResult(result: any, toolName: string): string {
-    if (typeof result === 'string') {
-      return result;
-    }
+  getCacheStats(): {
+    totalCached: number;
+    activeSessions: number;
+    cacheHitRate?: number;
+  } {
+    return {
+      totalCached: this.sessionToolsCache.size,
+      activeSessions: this.sessionToSignature.size
+    };
+  }
 
-    if (result === null || result === undefined) {
-      return `Tool ${toolName} completed successfully`;
-    }
-
-    try {
-      return JSON.stringify(result, null, 2);
-    } catch {
-      return String(result);
+  /**
+   * 清除特定会话的工具
+   */
+  clearSessionTools(sessionId: string): void {
+    const signature = this.sessionToSignature.get(sessionId);
+    if (signature) {
+      this.sessionToSignature.delete(sessionId);
+      
+      // 检查是否还有其他会话使用相同的签名
+      let inUse = false;
+      for (const [_, sig] of this.sessionToSignature.entries()) {
+        if (sig === signature) {
+          inUse = true;
+          break;
+        }
+      }
+      
+      // 如果没有其他会话使用，删除缓存
+      if (!inUse) {
+        this.sessionToolsCache.delete(signature);
+      }
     }
   }
 }

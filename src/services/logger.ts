@@ -17,7 +17,8 @@ export enum LogCategory {
   PERMISSION = 'permission',
   SESSION = 'session',
   ERROR = 'error',
-  AUDIT = 'audit'
+  AUDIT = 'audit',
+  SYSTEM = 'system'
 }
 
 export interface LogContext {
