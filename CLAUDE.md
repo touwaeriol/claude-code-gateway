@@ -9,49 +9,49 @@ Claude Code OpenAI 代理服务 - 提供 OpenAI 兼容的 API 接口，底层使
 ### 1. 需求与设计文档
 
 - **[需求文档](../docs/REQUIREMENTS.md)**
-  - 项目背景和目标
-  - 功能需求（API兼容性、工具调用、模型支持等）
-  - 非功能需求（性能、安全、可维护性）
-  - 用户故事和验收标准
+    - 项目背景和目标
+    - 功能需求（API兼容性、工具调用、模型支持等）
+    - 非功能需求（性能、安全、可维护性）
+    - 用户故事和验收标准
 
 - **[技术设计文档](../docs/TECHNICAL_DESIGN.md)**
-  - 系统架构（单一服务设计）
-  - 核心组件设计（SessionManager、MCPEndpoint、ClaudeService）
-  - 统一 MCP 端口设计（请求头路由）
-  - 逐步实现方案（5个阶段，12天完成）
-  - API设计和数据流
+    - 系统架构（单一服务设计）
+    - 核心组件设计（SessionManager、MCPEndpoint、ClaudeService）
+    - 统一 MCP 端口设计（请求头路由）
+    - 逐步实现方案（5个阶段，12天完成）
+    - API设计和数据流
 
 - **[统一 MCP 端口设计](../docs/UNIFIED_MCP_DESIGN.md)**
-  - 使用单一 Streamable HTTP 端口
-  - 通过请求头区分会话和客户端
-  - 动态工具分配机制
-  - 客户端连接管理
+    - 使用单一 Streamable HTTP 端口
+    - 通过请求头区分会话和客户端
+    - 动态工具分配机制
+    - 客户端连接管理
 
 - **[文档总览](../docs/README.md)**
-  - 所有文档的导航入口
-  - 针对不同角色的阅读指南
+    - 所有文档的导航入口
+    - 针对不同角色的阅读指南
 
 ### 2. 主要文档
 
 - **[项目README](../README.md)**
-  - 快速开始指南
-  - 安装和运行说明
-  - 基本使用示例
+    - 快速开始指南
+    - 安装和运行说明
+    - 基本使用示例
 
 - **[原始需求文档](../CLAUDE_CODE_OPENAI_PROXY_REQUIREMENTS.md)**
-  - 已拆分为独立的需求和设计文档
-  - 保留作为历史参考
+    - 已拆分为独立的需求和设计文档
+    - 保留作为历史参考
 
 ### 3. 源代码
 
 - **[主服务实现](../src/index.ts)**
-  - Express服务器
-  - OpenAI兼容端点
-  - 基础Claude Code集成
+    - Express服务器
+    - OpenAI兼容端点
+    - 基础Claude Code集成
 
 - **[TypeScript配置](../tsconfig.json)**
-  - 编译配置
-  - 类型检查设置
+    - 编译配置
+    - 类型检查设置
 
 ## 技术栈
 
@@ -59,28 +59,28 @@ Claude Code OpenAI 代理服务 - 提供 OpenAI 兼容的 API 接口，底层使
 - **语言**: TypeScript 5.0+
 - **框架**: Express.js
 - **AI SDK**: @anthropic-ai/claude-code
-  - NPM 包：`@anthropic-ai/claude-code`
-  - 官方文档：https://docs.anthropic.com/en/docs/claude-code/sdk
-  - 核心 API：`query` 函数
-- **协议**: 
-  - OpenAI API 规范：https://platform.openai.com/docs/api-reference
-  - MCP (Model Context Protocol)：https://docs.anthropic.com/en/docs/claude-code/mcp
+    - NPM 包：`@anthropic-ai/claude-code`
+    - 官方文档：https://docs.anthropic.com/en/docs/claude-code/sdk
+    - 核心 API：`query` 函数
+- **协议**:
+    - OpenAI API 规范：https://platform.openai.com/docs/api-reference
+    - MCP (Model Context Protocol)：https://docs.anthropic.com/en/docs/claude-code/mcp
 
 ## 核心功能
 
 1. **OpenAI API 兼容**
-   - `/v1/chat/completions` - 聊天完成
-   - `/v1/models` - 模型列表
-   - 流式/非流式响应
+    - `/v1/chat/completions` - 聊天完成
+    - `/v1/models` - 模型列表
+    - 流式/非流式响应
 
 2. **工具调用支持**（计划中）
-   - 通过MCP协议实现
-   - 支持动态工具注册
-   - Session ID机制关联请求
+    - 通过MCP协议实现
+    - 支持动态工具注册
+    - Session ID机制关联请求
 
 3. **模型映射**
-   - `custom-claude-4-sonnet` → Claude Sonnet
-   - `custom-claude-4-opus` → Claude Opus
+    - `custom-claude-4-sonnet` → Claude Sonnet
+    - `custom-claude-4-opus` → Claude Opus
 
 ## 实施计划
 

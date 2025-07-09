@@ -1,5 +1,5 @@
-import { ChatMessage, Tool, ToolCall } from '../types/openai';
-import { SDKMessage } from '../types/claude';
+import { ExtendedChatMessage as ChatMessage, Tool, ToolCall } from '../types/openai-sdk.js';
+import { SDKMessage } from '../types/claude.js';
 
 export class MessageConverter {
   /**
@@ -12,13 +12,21 @@ export class MessageConverter {
     for (const msg of messages) {
       switch (msg.role) {
         case 'user':
-          if (msg.content !== null && msg.content !== undefined) {
-            const userContent = typeof msg.content === 'string' 
-              ? msg.content 
-              : JSON.stringify(msg.content);
-            prompt += `Human: ${userContent}\n\n`;
-          } else {
+          if (msg.content === null || msg.content === undefined) {
             prompt += `Human: \n\n`;
+          } else if (typeof msg.content === 'string') {
+            prompt += `Human: ${msg.content}\n\n`;
+          } else if (Array.isArray(msg.content)) {
+            // 处理多部分内容数组（OpenAI 格式）
+            const textParts = msg.content
+              .filter((part: any) => part.type === 'text')
+              .map((part: any) => part.text)
+              .join('\n');
+            prompt += `Human: ${textParts}\n\n`;
+          } else {
+            // 其他情况，序列化为 JSON
+            const userContent = JSON.stringify(msg.content);
+            prompt += `Human: ${userContent}\n\n`;
           }
           break;
           
@@ -103,20 +111,40 @@ export class MessageConverter {
           // 确保 content 是字符串
           if (msg.content === null || msg.content === undefined) {
             prompt += `Human: \n\n`;
+          } else if (typeof msg.content === 'string') {
+            prompt += `Human: ${msg.content}\n\n`;
+          } else if (Array.isArray(msg.content)) {
+            // 处理多部分内容数组（OpenAI 格式）
+            const textParts = msg.content
+              .filter((part: any) => part.type === 'text')
+              .map((part: any) => part.text)
+              .join('\n');
+            prompt += `Human: ${textParts}\n\n`;
           } else {
-            // 确保对象被序列化为紧凑的单行 JSON
-            const userContent = typeof msg.content === 'string' 
-              ? msg.content 
-              : JSON.stringify(msg.content);
+            // 其他情况，序列化为 JSON
+            const userContent = JSON.stringify(msg.content);
             prompt += `Human: ${userContent}\n\n`;
           }
           break;
           
         case 'assistant':
           if (msg.content) {
-            // 确保 content 是字符串
-            const assistantContent = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
-            prompt += `Assistant: ${assistantContent}\n\n`;
+            // 处理 assistant 的 content（可能是字符串或数组）
+            if (typeof msg.content === 'string') {
+              prompt += `Assistant: ${msg.content}\n\n`;
+            } else if (Array.isArray(msg.content)) {
+              // 处理多部分内容数组（OpenAI 格式）
+              const textParts = msg.content
+                .filter((part: any) => part.type === 'text')
+                .map((part: any) => part.text)
+                .join('\n');
+              if (textParts) {
+                prompt += `Assistant: ${textParts}\n\n`;
+              }
+            } else if (msg.content !== null) {
+              // 其他情况，序列化为 JSON
+              prompt += `Assistant: ${JSON.stringify(msg.content)}\n\n`;
+            }
           }
           
           // 处理工具调用

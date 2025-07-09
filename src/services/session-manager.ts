@@ -1,4 +1,4 @@
-import { Tool } from '../types/openai';
+import { Tool } from '../types/openai-sdk.js';
 
 export interface SessionContext {
   id: string;

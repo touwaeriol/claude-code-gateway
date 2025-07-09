@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
-import { SessionManager } from './session-manager';
-import { MCPGateway } from './mcp-gateway';
-import { ToolManager } from './tool-manager';
+import { SessionManager } from './session-manager.js';
+import { MCPGateway } from './mcp-gateway.js';
+import { ToolManager } from './tool-manager.js';
 
 interface JsonRpcRequest {
   jsonrpc: string;

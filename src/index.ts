@@ -8,57 +8,86 @@ import {
   ChatCompletionResponse, 
   ChatCompletionChunk,
   ChatMessage,
+  ExtendedChatMessage,
   Tool,
-  ToolCall 
-} from './types/openai';
-import { SDKMessage, CLAUDE_BUILTIN_TOOLS } from './types/claude';
+  ToolCall,
+  ChatCompletionCreateParams 
+} from './types/openai-sdk.js';
+import { SDKMessage } from './types/claude.js';
 
 // 导入服务
-import { SessionManager } from './services/session-manager';
-import { MessageConverter } from './services/message-converter';
-import { PermissionController } from './services/permission-controller';
-import { MCPGateway } from './services/mcp-gateway';
-import { MCPAuthServer } from './services/mcp-auth-server';
-import { MCPGatewayServer } from './services/mcp-gateway-server';
-import { ToolManager } from './services/tool-manager';
-import { ClaudeService } from './services/claude-service';
-import { ToolCallManager } from './services/tool-call-manager';
-import { MessageSnapshotCache } from './services/message-snapshot-cache';
-import { logger, LogLevel, LogCategory } from './services/logger';
-import { ErrorHandler, AppError, ValidationError, NotFoundError } from './services/error-handler';
+import { SessionManager } from './services/session-manager.js';
+import { PermissionController } from './services/permission-controller.js';
+import { MCPGateway } from './services/mcp-gateway.js';
+import { MCPAuthServer } from './services/mcp-auth-server.js';
+import { MCPGatewayServer } from './services/mcp-gateway-server.js';
+import { ToolManager } from './services/tool-manager.js';
+import { ClaudeService } from './services/claude-service.js';
+import { ToolCallManager } from './services/tool-call-manager.js';
+import { MessageTrieCache } from './services/message-trie-cache.js';
+import { ClaudeSessionManager } from './services/claude-session-manager.js';
+import { logger, LogLevel, LogCategory } from './services/logger.js';
+import { ValidationError } from './services/error-handler.js';
 
 // 导入中间件
-import { requestLogging, errorHandling, notFoundHandler } from './middleware/logging';
+import { requestLogging, errorHandling, notFoundHandler } from './middleware/logging.js';
+
+// 导入工具和配置
+import { ResponseHelper } from './utils/response-helper.js';
+import { StreamWriter } from './utils/stream-writer.js';
+import { LogHelper } from './utils/log-helper.js';
+import { SessionHelper } from './utils/session-helper.js';
+import { RequestHandler } from './utils/request-handler.js';
+import { ResponseProcessor } from './utils/response-processor.js';
+import { RequestValidator } from './utils/request-validator.js';
+import { ProcessMonitor } from './utils/process-monitor.js';
+import { SDKOutputCapture } from './utils/sdk-output-capture.js';
+import { SERVER_CONFIG, MODEL_CONFIG, TIMEOUT_CONFIG, REQUEST_LIMITS, RESPONSE_FORMATS } from './config/constants.js';
+import { ConsoleLogger } from './utils/console-logger.js';
+import { createLogger } from './utils/unified-logger.js';
 
 class ClaudeCodeGateway {
   private app: express.Application;
   private sessionManager: SessionManager;
-  private messageConverter: MessageConverter;
   private permissionController: PermissionController;
   private mcpGateway: MCPGateway;
   private mcpAuthServer: MCPAuthServer;
   private mcpGatewayServer: MCPGatewayServer;
   private toolManager: ToolManager;
   private toolCallManager: ToolCallManager;
-  private messageSnapshotCache: MessageSnapshotCache;
+  private messageTrieCache: MessageTrieCache;
   private claudeService: ClaudeService;
+  private claudeSessionManager: ClaudeSessionManager;
+  private responseProcessor: ResponseProcessor;
   private port: number;
 
-  constructor(port: number = 3000) {
+  constructor(port: number = SERVER_CONFIG.DEFAULT_PORT) {
     this.port = port;
     this.app = express();
     
+    // 启用控制台日志记录
+    ConsoleLogger.enable();
+    
+    // 启用进程监控
+    ProcessMonitor.enable();
+    console.log('✅ 进程监控已启用');
+    
+    // 启用 SDK 输出捕获
+    SDKOutputCapture.interceptSpawn();
+    console.log('✅ SDK 输出捕获已启用');
+    
     // 初始化服务
     this.sessionManager = new SessionManager();
-    this.messageConverter = new MessageConverter();
     this.toolCallManager = new ToolCallManager();
     this.toolManager = new ToolManager();
-    this.messageSnapshotCache = new MessageSnapshotCache();
+    this.messageTrieCache = new MessageTrieCache();
     this.permissionController = new PermissionController(this.sessionManager);
     this.mcpGateway = new MCPGateway(this.sessionManager, this.permissionController, this.toolCallManager, this.toolManager);
     this.mcpAuthServer = new MCPAuthServer(this.sessionManager, this.permissionController);
     this.mcpGatewayServer = new MCPGatewayServer(this.sessionManager, this.mcpGateway, this.toolManager);
     this.claudeService = new ClaudeService(this.sessionManager, port, this.toolCallManager);
+    this.claudeSessionManager = new ClaudeSessionManager(this.claudeService, this.toolCallManager);
+    this.responseProcessor = new ResponseProcessor(this.claudeSessionManager, this.messageTrieCache);
     
     this.setupMiddleware();
     this.setupRoutes();
@@ -73,7 +102,7 @@ class ClaudeCodeGateway {
     }));
 
     // Body parsing
-    this.app.use(express.json({ limit: '10mb' }));
+    this.app.use(express.json({ limit: REQUEST_LIMITS.JSON_LIMIT }));
     
     // Request logging
     this.app.use(requestLogging);
@@ -113,7 +142,7 @@ class ClaudeCodeGateway {
   private handleHealth(req: Request, res: Response): void {
     const health = {
       status: 'ok',
-      version: '2.0.0',
+      version: SERVER_CONFIG.VERSION,
       timestamp: new Date().toISOString(),
       services: {
         sessionManager: this.sessionManager.getActiveSessionCount() > -1 ? 'healthy' : 'unhealthy',
@@ -124,7 +153,8 @@ class ClaudeCodeGateway {
         activeSessions: this.sessionManager.getActiveSessionCount(),
         pendingToolCalls: this.toolCallManager.getPendingCount(),
         toolCache: this.toolManager.getCacheStats(),
-        messageSnapshots: this.messageSnapshotCache.getStats()
+        messageSnapshots: this.messageTrieCache.getStats(),
+        claudeSessions: this.claudeSessionManager.getStats()
       }
     };
     
@@ -132,499 +162,151 @@ class ClaudeCodeGateway {
   }
 
   private async handleChatCompletion(
-    req: Request<{}, any, ChatCompletionRequest>, 
+    req: Request<{}, any, ChatCompletionCreateParams>, 
     res: Response
   ): Promise<void> {
-    const requestId = req.requestId!;
-    
-    // 创建 AbortController 来支持取消请求
-    const abortController = new AbortController();
-    
-    // 监听客户端断开连接
-    req.on('close', () => {
-      console.log(`客户端断开连接，取消请求 ${requestId}`);
-      abortController.abort(); // 这会触发 Claude Code 进程结束，进而清理工具调用
-    });
+    let processedRequest: any;
     
     try {
-      const {
-        model = 'custom-claude-4-sonnet',
-        messages,
-        tools,
-        stream = false,
-        temperature,
-        max_tokens
-      } = req.body;
+      // 详细记录请求信息
+      console.log('\n========== 新请求 ==========');
+      console.log(`时间: ${new Date().toISOString()}`);
+      console.log(`User-Agent: ${req.headers['user-agent']}`);
+      console.log(`Content-Type: ${req.headers['content-type']}`);
+      console.log(`Authorization: ${req.headers.authorization ? '已提供' : '未提供'}`);
+      console.log(`请求体:`, JSON.stringify(req.body, null, 2));
+      console.log('=============================\n');
+
+      // 处理请求
+      processedRequest = RequestHandler.processRequest(req);
+      const { requestId, model, messages, tools, stream, abortController } = processedRequest;
+
+      console.log(`[请求处理] requestId: ${requestId}, model: ${model}, stream: ${stream}`);
+      console.log(`[请求处理] 消息数: ${messages.length}, 工具数: ${tools?.length || 0}`);
 
       // 验证请求
-      this.validateChatRequest(req.body);
+      RequestValidator.validate(req.body);
       
-      // 尝试从消息快照找到会话
-      let sessionId = this.messageSnapshotCache.findSessionByMessages(messages);
-      
-      if (!sessionId) {
-        // 新会话或独立请求
-        sessionId = uuidv4();
-        console.log(`创建新会话: ${sessionId}`);
-      } else {
-        console.log(`恢复缓存的会话: ${sessionId}`);
-        // 命中缓存说明这是工具调用的后续请求
-        // 消息中应该包含工具结果
+      // 解析会话上下文
+      const sessionContext = await SessionHelper.resolveSession(
+        messages,
+        this.messageTrieCache,
+        this.toolCallManager,
+        this.claudeSessionManager
+      );
+
+      // 如果需要继续原会话
+      if (sessionContext.shouldContinue) {
+        const finalMessages = await this.claudeSessionManager.resumeSession(sessionContext.sessionId);
+        if (finalMessages) {
+          const response = this.convertToOpenAIResponse(finalMessages, model);
+          res.json(response);
+          return;
+        }
       }
 
-      // 注册会话和工具权限
-      if (tools && tools.length > 0) {
-        // 在 ToolManager 中注册工具
-        this.toolManager.registerSessionTools(sessionId, tools);
-        // 注册权限
-        this.permissionController.registerSession(sessionId, tools);
-      } else {
-        // 即使没有工具也创建会话
-        this.sessionManager.createSession(sessionId);
-      }
+      // 注册会话
+      SessionHelper.registerSession(
+        sessionContext.sessionId,
+        tools,
+        this.sessionManager,
+        this.toolManager,
+        this.permissionController
+      );
 
-      // 提取系统消息作为 customSystemPrompt
-      const systemMessages = messages.filter(m => m.role === 'system');
-      const customSystemPrompt = systemMessages.length > 0 
-        ? systemMessages.map(m => m.content).join('\n') 
-        : undefined;
-
-      // 过滤掉系统消息，只传递用户和助手消息
-      const conversationMessages = messages.filter(m => m.role !== 'system');
+      // 准备消息
+      const customSystemPrompt = SessionHelper.extractSystemPrompt(messages);
+      const conversationMessages = SessionHelper.filterConversationMessages(messages);
+      const claudeModel = RequestHandler.getClaudeModel(model);
       
-      const claudeModel = model.includes('sonnet') ? 'claude-3-5-sonnet-20241022' : 'claude-3-5-sonnet-20241022';
-      
-      // 构建提示词
-      const prompt = this.messageConverter.buildPrompt(conversationMessages);
-      
-      logger.log(LogLevel.INFO, LogCategory.REQUEST, 'Chat completion request', {
+      // 记录请求
+      LogHelper.logRequest(LogCategory.REQUEST, 'Chat completion request', {
         requestId,
-        sessionId,
+        sessionId: sessionContext.sessionId,
         model,
         hasTools: !!tools && tools.length > 0,
         messageCount: messages.length,
         stream
       });
 
-      if (stream) {
-        await this.handleStreamResponse(
-          res, 
-          prompt,
-          messages, 
-          model, 
-          claudeModel,
-          sessionId,
-          requestId,
-          abortController,
-          customSystemPrompt
-        );
-      } else {
-        // 非流式响应
-        const response = await this.handleNonStreamResponse(
-          prompt,
-          messages,
-          model,
-          claudeModel,
-          sessionId,
-          requestId,
-          abortController,
-          customSystemPrompt
-        );
-        
-        res.json(response);
-      }
-
-    } catch (error) {
-      // 错误处理由中间件处理
-      // Claude Code 进程结束时会自动清理相关工具调用
-      throw error;
-    }
-  }
-
-  private async handleNonStreamResponse(
-    prompt: string,
-    messages: ChatMessage[],
-    model: string,
-    claudeModel: string,
-    sessionId: string,
-    requestId: string,
-    abortController: AbortController,
-    customSystemPrompt?: string
-  ): Promise<ChatCompletionResponse> {
-    try {
-      // 使用流式处理，以便能够检测工具调用
-      const messageStream = this.claudeService.queryWithSDKStream({
-        sessionId,
-        model: claudeModel,
-        prompt,
+      // 处理响应
+      await this.processResponse({
+        res,
+        conversationMessages,
+        messages,
+        model,
+        claudeModel,
+        sessionId: sessionContext.sessionId,
+        requestId,
         abortController,
-        customSystemPrompt
+        customSystemPrompt,
+        stream
       });
 
-      const sdkMessages: SDKMessage[] = [];
-      let toolCallDetected = false;
+    } catch (error) {
+      console.error('\n========== 请求处理失败 ==========');
+      console.error(`请求ID: ${processedRequest?.requestId || 'unknown'}`);
+      console.error(`错误类型: ${error?.constructor?.name || 'unknown'}`);
+      console.error(`错误消息: ${error instanceof Error ? error.message : String(error)}`);
+      console.error(`错误堆栈:`, error instanceof Error ? error.stack : '无堆栈信息');
+      console.error('===================================\n');
       
-      // 处理消息流
-      for await (const message of messageStream) {
-        sdkMessages.push(message);
-        
-        // 检查是否有工具调用
-        if (message.type === 'assistant' && message.message.content) {
-          const content = message.message.content;
-          if (Array.isArray(content)) {
-            for (const block of content) {
-              if (block.type === 'tool_use' && block.name.startsWith('mcp__gateway__')) {
-                // 检测到工具调用，立即返回
-                toolCallDetected = true;
-                
-                const toolCall: ToolCall = {
-                  id: block.id,
-                  type: 'function',
-                  function: {
-                    name: block.name.replace('mcp__gateway__', ''),
-                    arguments: JSON.stringify(block.input || {})
-                  }
-                };
-                
-                // 创建消息快照，包含到目前为止的所有消息（使用原始的 OpenAI 格式消息）
-                const messagesWithToolCall: ChatMessage[] = [
-                  ...messages,
-                  {
-                    role: 'assistant' as const,
-                    content: null,
-                    tool_calls: [toolCall]
-                  }
-                ];
-                this.messageSnapshotCache.createSnapshot(messagesWithToolCall, sessionId);
-                
-                return {
-                  id: `chatcmpl-${uuidv4()}`,
-                  object: 'chat.completion',
-                  created: Math.floor(Date.now() / 1000),
-                  model,
-                  choices: [{
-                    index: 0,
-                    message: {
-                      role: 'assistant',
-                      content: null,
-                      tool_calls: [toolCall]
-                    },
-                    finish_reason: 'tool_calls'
-                  }],
-                  usage: {
-                    prompt_tokens: 0,
-                    completion_tokens: 0,
-                    total_tokens: 0
-                  }
-                };
-              }
-            }
-          }
-        }
+      // 如果是来自 Cline 的请求，提供更详细的错误信息
+      if (req.headers['user-agent']?.includes('Cline') || req.headers['user-agent']?.includes('cline')) {
+        console.error('[Cline 错误] 检测到来自 Cline 的请求失败');
+        console.error('[Cline 错误] 请求详情:', {
+          model: req.body?.model,
+          messages: req.body?.messages?.length,
+          tools: req.body?.tools?.length,
+          stream: req.body?.stream
+        });
       }
       
-      // 没有工具调用，返回完整响应
-      return this.convertToOpenAIResponse(sdkMessages, model);
-    } catch (error) {
-      console.error('Claude Code 执行错误:', error);
       throw error;
     }
   }
+
+  private async processResponse(options: {
+    res: Response;
+    conversationMessages: ExtendedChatMessage[];
+    messages: ExtendedChatMessage[];
+    model: string;
+    claudeModel: string;
+    sessionId: string;
+    requestId: string;
+    abortController: AbortController;
+    customSystemPrompt?: string;
+    stream: boolean;
+  }): Promise<void> {
+    const responseOptions = {
+      conversationMessages: options.conversationMessages,
+      messages: options.messages,
+      model: options.model,
+      claudeModel: options.claudeModel,
+      sessionId: options.sessionId,
+      requestId: options.requestId,
+      abortController: options.abortController,
+      customSystemPrompt: options.customSystemPrompt
+    };
+
+    if (options.stream) {
+      await this.responseProcessor.processStream(options.res, responseOptions);
+    } else {
+      const response = await this.responseProcessor.processNonStream(responseOptions);
+      options.res.json(response);
+    }
+  }
+
 
   private convertToOpenAIResponse(claudeMessages: SDKMessage[], model: string): ChatCompletionResponse {
-    // 提取所有 assistant 消息
-    const assistantMessages = claudeMessages.filter(m => m.type === 'assistant');
-    
-    // 合并内容
-    let combinedContent = '';
-    const allToolCalls: ToolCall[] = [];
-    
-    for (let i = 0; i < assistantMessages.length; i++) {
-      const assistantMessage = assistantMessages[i];
-      
-      if (assistantMessage.message.content) {
-        if (combinedContent && i > 0) {
-          combinedContent += '\n\n'; // 用换行分隔多个响应
-        }
-        // content 可能是字符串或对象数组
-        const content = assistantMessage.message.content;
-        if (typeof content === 'string') {
-          combinedContent += content;
-        } else if (Array.isArray(content)) {
-          // 处理结构化内容
-          for (const block of content) {
-            if (block.type === 'text') {
-              combinedContent += block.text;
-            }
-          }
-        }
-      }
-      
-      // 检查工具使用
-      const messageContent = assistantMessage.message.content;
-      if (Array.isArray(messageContent)) {
-        for (const block of messageContent) {
-          if (block.type === 'tool_use') {
-            // Claude Code SDK 的工具调用格式
-            // 检查是否是 MCP 工具调用（以 mcp__ 开头）
-            if (block.name.startsWith('mcp__gateway__')) {
-              allToolCalls.push({
-                id: block.id,
-                type: 'function',
-                function: {
-                  // 移除 mcp__gateway__ 前缀，返回原始工具名
-                  name: block.name.replace('mcp__gateway__', ''),
-                  arguments: JSON.stringify(block.input || {})
-                }
-              });
-            }
-            // 忽略其他工具调用（Claude Code SDK 的内部工具）
-          }
-        }
-      }
-    }
-    
-    // 计算 token 使用量（从 SDK 消息中提取）
-    const usage = this.extractUsage(claudeMessages);
-    
-    return {
-      id: `chatcmpl-${uuidv4()}`,
-      object: 'chat.completion',
-      created: Math.floor(Date.now() / 1000),
-      model,
-      choices: [{
-        index: 0,
-        message: {
-          role: 'assistant',
-          content: combinedContent || null,
-          tool_calls: allToolCalls.length > 0 ? allToolCalls : undefined
-        },
-        finish_reason: allToolCalls.length > 0 ? 'tool_calls' : 'stop'
-      }],
-      usage: usage || {
-        prompt_tokens: 0,
-        completion_tokens: 0,
-        total_tokens: 0
-      }
-    };
+    return this.responseProcessor.convertToResponse(claudeMessages, model) as ChatCompletionResponse;
   }
 
-  private extractUsage(messages: SDKMessage[]): any {
-    // 查找包含 usage 信息的消息
-    for (const msg of messages) {
-      if (msg.type === 'result' && 'usage' in msg) {
-        return {
-          prompt_tokens: msg.usage.input_tokens || 0,
-          completion_tokens: msg.usage.output_tokens || 0,
-          total_tokens: (msg.usage.input_tokens || 0) + (msg.usage.output_tokens || 0)
-        };
-      }
-    }
-    return null;
-  }
 
-  private async handleStreamResponse(
-    res: Response,
-    prompt: string,
-    messages: ChatMessage[],
-    model: string,
-    claudeModel: string,
-    sessionId: string,
-    requestId: string,
-    abortController: AbortController,
-    customSystemPrompt?: string
-  ): Promise<void> {
-    res.writeHead(200, {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      'Connection': 'keep-alive',
-      'X-Request-ID': requestId
-    });
 
-    const chatId = `chatcmpl-${uuidv4()}`;
-    const created = Math.floor(Date.now() / 1000);
-    let hasToolCalls = false;
-    let detectedToolCall = false;  // 标记是否检测到工具调用
 
-    try {
-      // 获取流式消息
-      const messageStream = this.claudeService.queryWithSDKStream({
-        sessionId,
-        model: claudeModel,
-        prompt,
-        abortController,
-        customSystemPrompt
-      });
 
-      let messageIndex = 0;
-      
-      // 实时处理流式消息
-      for await (const message of messageStream) {
-        // 处理 assistant 消息
-        if (message.type === 'assistant') {
-          // 如果这是新的消息（不是第一个），先发送一个分隔
-          if (messageIndex > 0) {
-            this.sendStreamChunk(res, {
-              id: chatId,
-              object: 'chat.completion.chunk',
-              created,
-              model,
-              choices: [{
-                index: 0,
-                delta: { content: '\n\n' },
-                finish_reason: null
-              }]
-            });
-          }
-          
-          // 处理消息内容
-          const content = message.message.content;
-          
-          if (typeof content === 'string' && content.length > 0) {
-            // 纯文本内容
-            this.sendStreamChunk(res, {
-              id: chatId,
-              object: 'chat.completion.chunk',
-              created,
-              model,
-              choices: [{
-                index: 0,
-                delta: { content: content },
-                finish_reason: null
-              }]
-            });
-          } else if (Array.isArray(content)) {
-            // 结构化内容（包含文本和工具调用）
-            for (const block of content) {
-              if (block.type === 'text') {
-                // 发送文本内容
-                this.sendStreamChunk(res, {
-                  id: chatId,
-                  object: 'chat.completion.chunk',
-                  created,
-                  model,
-                  choices: [{
-                    index: 0,
-                    delta: { content: block.text },
-                    finish_reason: null
-                  }]
-                });
-              } else if (block.type === 'tool_use' && block.name.startsWith('mcp__gateway__')) {
-                // 检测到 MCP 工具调用
-                detectedToolCall = true;
-                
-                // 立即结束流式响应，返回工具调用
-                const toolCall: ToolCall = {
-                  id: block.id,
-                  type: 'function',
-                  function: {
-                    name: block.name.replace('mcp__gateway__', ''),
-                    arguments: JSON.stringify(block.input || {})
-                  }
-                };
-                
-                // 创建消息快照
-                const messagesWithToolCall: ChatMessage[] = [
-                  ...messages,
-                  {
-                    role: 'assistant' as const,
-                    content: null,
-                    tool_calls: [toolCall]
-                  }
-                ];
-                this.messageSnapshotCache.createSnapshot(messagesWithToolCall, sessionId);
-                
-                this.sendStreamChunk(res, {
-                  id: chatId,
-                  object: 'chat.completion.chunk',
-                  created,
-                  model,
-                  choices: [{
-                    index: 0,
-                    delta: { tool_calls: [toolCall] },
-                    finish_reason: 'tool_calls'
-                  }]
-                });
-                
-                hasToolCalls = true;
-                
-                // 立即结束流，让客户端执行工具
-                this.sendStreamChunk(res, {
-                  id: chatId,
-                  object: 'chat.completion.chunk',
-                  created,
-                  model,
-                  choices: [{
-                    index: 0,
-                    delta: {},
-                    finish_reason: 'tool_calls'
-                  }]
-                });
-                
-                res.write('data: [DONE]\n\n');
-                res.end();
-                
-                // 退出循环，等待客户端返回工具结果
-                return;
-              }
-            }
-          }
-          
-          messageIndex++;
-        }
-      }
-      
-      // 发送结束块
-      this.sendStreamChunk(res, {
-        id: chatId,
-        object: 'chat.completion.chunk',
-        created,
-        model,
-        choices: [{
-          index: 0,
-          delta: {},
-          finish_reason: hasToolCalls ? 'tool_calls' : 'stop'
-        }]
-      });
-
-      res.write('data: [DONE]\n\n');
-      res.end();
-
-    } catch (error) {
-      console.error('Stream response 处理错误:', error);
-      
-      // 返回原始错误信息给客户端
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      const errorResponse = {
-        error: {
-          message: errorMessage,
-          type: error?.constructor?.name || 'Error'
-        }
-      };
-      
-      res.write(`data: ${JSON.stringify(errorResponse)}\n\n`);
-      res.end();
-      throw error;
-    }
-  }
-
-  private sendStreamChunk(res: Response, chunk: any): void {
-    res.write(`data: ${JSON.stringify(chunk)}\n\n`);
-  }
-
-  /**
-   * 检查消息中是否包含工具调用结果
-   * @returns 是否包含工具结果
-   */
-  private hasToolResults(messages: ChatCompletionRequest['messages']): boolean {
-    return messages.some(msg => msg.role === 'tool' && msg.tool_call_id);
-  }
-
-  /**
-   * 设置定期清理定时器
-   */
   private setupCleanupTimer(): void {
-    // 每分钟检查一次资源使用情况
     setInterval(() => {
       const stats = {
         pendingToolCalls: this.toolCallManager.getPendingCount(),
@@ -634,66 +316,27 @@ class ClaudeCodeGateway {
       
       console.log('资源使用情况:', stats);
       
-      // 如果有异常多的待处理工具调用，记录警告
-      if (stats.pendingToolCalls > 50) {
-        console.warn(`警告：待处理工具调用过多 (${stats.pendingToolCalls})，可能存在资源泄漏`);
+      if (stats.pendingToolCalls > TIMEOUT_CONFIG.WARNING_THRESHOLD) {
+        console.warn(`警告：待处理工具调用过多 (${stats.pendingToolCalls})`);
       }
-    }, 60000); // 每分钟
+    }, TIMEOUT_CONFIG.CLEANUP_INTERVAL);
   }
 
-  private validateChatRequest(request: ChatCompletionRequest): void {
-    // 验证模型
-    if (request.model && !this.isModelSupported(request.model)) {
-      throw new ValidationError(`Model '${request.model}' is not supported`);
-    }
-
-    // 验证消息
-    if (!request.messages || !Array.isArray(request.messages) || request.messages.length === 0) {
-      throw new ValidationError('Messages array is required and must not be empty');
-    }
-
-    // 验证工具
-    if (request.tools) {
-      if (!Array.isArray(request.tools)) {
-        throw new ValidationError('Tools must be an array');
-      }
-      
-      for (const tool of request.tools) {
-        if (tool.type !== 'function') {
-          throw new ValidationError('Only function tools are supported');
-        }
-        
-        if (!tool.function?.name) {
-          throw new ValidationError('Tool function name is required');
-        }
-      }
-    }
-  }
 
   private handleModels(req: Request, res: Response): void {
-    res.json({
-      object: 'list',
-      data: [
-        {
-          id: 'custom-claude-4-sonnet',
-          object: 'model',
-          created: Date.now() / 1000,
-          owned_by: 'custom',
-          permission: [],
-          root: 'custom-claude-4-sonnet',
-          parent: null
-        },
-        {
-          id: 'custom-claude-4-opus',
-          object: 'model',
-          created: Date.now() / 1000,
-          owned_by: 'custom',
-          permission: [],
-          root: 'custom-claude-4-opus',
-          parent: null
-        }
-      ]
-    });
+    const models = MODEL_CONFIG.SUPPORTED_MODELS
+      .filter(id => id.startsWith('custom-'))
+      .map(id => ({
+        id,
+        object: 'model',
+        created: Date.now() / 1000,
+        owned_by: 'custom',
+        permission: [],
+        root: id,
+        parent: null
+      }));
+    
+    res.json({ object: 'list', data: models });
   }
 
   private async handlePermissionCheck(req: Request, res: Response): Promise<void> {
@@ -719,69 +362,57 @@ class ClaudeCodeGateway {
     await this.mcpGatewayServer.handleJsonRpc(req, res);
   }
 
-  private isModelSupported(model: string): boolean {
-    const supportedModels = [
-      'custom-claude-4-sonnet', 
-      'custom-claude-4-opus',
-      'gpt-3.5-turbo',
-      'gpt-4',
-      'gpt-4-turbo-preview'
-    ];
-    
-    return supportedModels.includes(model) || model.startsWith('custom-');
-  }
 
   async start(): Promise<void> {
     return new Promise((resolve) => {
       this.app.listen(this.port, () => {
-        console.log(`
-🚀 Claude Code Gateway v2 已启动！
-
-📡 服务地址: http://localhost:${this.port}
-🔧 基于 Claude Code SDK
-✅ 完全 OpenAI 兼容
-🔒 内置权限控制
-📊 审计日志已启用
-🎯 支持模型: custom-claude-4-sonnet, custom-claude-4-opus
-
-⚙️  环境配置:
-   CLAUDE_CODE_MAX_OUTPUT_TOKENS: ${process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS || '8000'} (默认 8000)
-   
-   💡 如遇到输出超限错误，可设置更大的值:
-      export CLAUDE_CODE_MAX_OUTPUT_TOKENS=16000
-
-📖 测试命令:
-   curl -X POST http://localhost:${this.port}/v1/chat/completions \\
-     -H "Content-Type: application/json" \\
-     -d '{ 
-       "model": "custom-claude-4-sonnet", 
-       "messages": [{"role": "user", "content": "你好"}] 
-     }'
-
-📊 健康检查: http://localhost:${this.port}/health
-🔐 权限端点: http://localhost:${this.port}/mcp/permission/check
-🛠️ 工具网关: http://localhost:${this.port}/mcp/gateway/:tool
-
-📝 日志位置: ./logs/
-🛑 使用 Ctrl+C 优雅关闭服务器
-        `);
-        
-        logger.log(LogLevel.INFO, LogCategory.SYSTEM, 'Server started', {
+        this.printStartupBanner();
+        LogHelper.logSystem('Server started', {
           port: this.port,
           environment: process.env.NODE_ENV || 'development'
         });
-        
         resolve();
       });
     });
   }
 
+  private printStartupBanner(): void {
+    const supportedModels = MODEL_CONFIG.SUPPORTED_MODELS
+      .filter(m => m.startsWith('custom-'))
+      .join(', ');
+    
+    console.log(`
+🚀 Claude Code Gateway v${SERVER_CONFIG.VERSION} 已启动！
+
+📡 服务地址: http://localhost:${this.port}
+🎯 支持模型: ${supportedModels}
+⚙️  MAX_OUTPUT_TOKENS: ${SERVER_CONFIG.MAX_OUTPUT_TOKENS}
+
+📖 测试: curl -X POST http://localhost:${this.port}/v1/chat/completions -H "Content-Type: application/json" -d '{"model": "${MODEL_CONFIG.SUPPORTED_MODELS[0]}", "messages": [{"role": "user", "content": "你好"}]}'
+📊 健康: http://localhost:${this.port}/health
+    `);
+  }
+
   async stop(): Promise<void> {
-    logger.log(LogLevel.INFO, LogCategory.SYSTEM, 'Server shutting down');
-    // 清理资源
+    LogHelper.logSystem('Server shutting down');
     process.exit(0);
   }
 }
+
+// 处理未捕获的 Promise 拒绝
+process.on('unhandledRejection', (reason, promise) => {
+  // 特殊处理 Claude Code SDK 的 Error 143
+  if (reason instanceof Error && reason.message.includes('Claude Code process exited with code 143')) {
+    console.log('[系统] 忽略 Claude Code SDK Error 143 (SIGTERM) - 这是 SDK 的已知问题');
+    return;
+  }
+  
+  // 其他未处理的拒绝仍然记录
+  console.error('\n========== 未处理的 Promise 拒绝 ==========');
+  console.error('原因:', reason);
+  console.error('Promise:', promise);
+  console.error('==========================================\n');
+});
 
 // 优雅关闭
 process.on('SIGINT', async () => {
@@ -795,7 +426,8 @@ process.on('SIGTERM', async () => {
 });
 
 // 导出和启动
-const gateway = new ClaudeCodeGateway(parseInt(process.env.PORT || '3000'));
+const port = parseInt(process.env.PORT || String(SERVER_CONFIG.DEFAULT_PORT));
+const gateway = new ClaudeCodeGateway(port);
 gateway.start().catch(console.error);
 
 export default ClaudeCodeGateway;

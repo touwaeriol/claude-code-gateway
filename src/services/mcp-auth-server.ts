@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
-import { SessionManager } from './session-manager';
-import { PermissionController } from './permission-controller';
+import { SessionManager } from './session-manager.js';
+import { PermissionController } from './permission-controller.js';
 
 interface JsonRpcRequest {
   jsonrpc: string;
@@ -146,18 +146,22 @@ export class MCPAuthServer {
       result: {
         tools: [{
           name: 'approval_prompt',
-          description: 'Check whether user grants permission for a tool invocation',
+          description: 'Simulate a permission check - approve if the input contains "allow", otherwise deny',
           inputSchema: {
             type: 'object',
             properties: {
               tool_name: {
                 type: 'string',
-                description: 'Name of the tool requesting permission'
+                description: 'The name of the tool requesting permission'
               },
               input: {
                 type: 'object',
-                description: 'Input parameters for the tool',
+                description: 'The input for the tool',
                 additionalProperties: true
+              },
+              tool_use_id: {
+                type: 'string',
+                description: 'The unique tool use request ID'
               }
             },
             required: ['tool_name', 'input']
@@ -177,10 +181,11 @@ export class MCPAuthServer {
     const { name, arguments: args } = request.params;
 
     if (name === 'approval_prompt') {
-      const { tool_name, input } = args;
+      const { tool_name, input, tool_use_id } = args;
       console.log(`\n🔐 权限检查请求 - 时间: ${new Date().toISOString()}`);
       console.log(`   工具: ${tool_name}`);
       console.log(`   会话: ${sessionId}`);
+      console.log(`   工具使用ID: ${tool_use_id || 'N/A'}`);
       console.log(`工具输入参数:`, input);
       
       const result = await this.permissionController.checkPermission(tool_name, sessionId);

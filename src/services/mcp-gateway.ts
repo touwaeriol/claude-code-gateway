@@ -1,8 +1,8 @@
 import { Request, Response } from 'express';
-import { SessionManager } from './session-manager';
-import { PermissionController } from './permission-controller';
-import { ToolCallManager } from './tool-call-manager';
-import { ToolManager } from './tool-manager';
+import { SessionManager } from './session-manager.js';
+import { PermissionController } from './permission-controller.js';
+import { ToolCallManager } from './tool-call-manager.js';
+import { ToolManager } from './tool-manager.js';
 
 export interface MCPToolResponse {
   success: boolean;

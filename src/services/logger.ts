@@ -61,10 +61,6 @@ export class Logger {
           filename: 'logs/error.log',
           level: 'error'
         }),
-        new winston.transports.File({
-          filename: 'logs/combined.log',
-          level: 'debug'  // 记录所有级别的日志
-        }),
         // Debug 专用日志文件
         new winston.transports.File({
           filename: 'logs/debug.log',
@@ -85,12 +81,7 @@ export class Logger {
       format: winston.format.combine(
         winston.format.timestamp(),
         winston.format.json()
-      ),
-      transports: [
-        new winston.transports.File({
-          filename: 'logs/audit.log'
-        })
-      ]
+      )
     });
   }
 

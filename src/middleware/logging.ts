@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { v4 as uuidv4 } from 'uuid';
-import { logger } from '../services/logger';
+import { logger } from '../utils/unified-logger.js';
 
 // 扩展 Request 接口以包含自定义属性
 declare global {
@@ -19,12 +19,35 @@ export function requestLogging(req: Request, res: Response, next: NextFunction):
   // 生成请求 ID
   req.requestId = req.headers['x-request-id'] as string || uuidv4();
   req.startTime = Date.now();
+  
+  // 为响应添加开始时间
+  (res as any).startTime = req.startTime;
 
   // 记录请求
-  logger.logRequest(req, req.requestId);
+  logger.access(`${req.method} ${req.path}`, {
+    requestId: req.requestId,
+    headers: req.headers,
+    body: req.body,
+    query: req.query
+  });
 
   // 拦截响应
   const originalSend = res.send;
+  const originalJson = res.json;
+  const originalWrite = res.write;
+  const originalEnd = res.end;
+  
+  // 用于收集响应数据
+  let responseData: any = null;
+  
+  // 拦截 json 方法
+  res.json = function(data: any): Response {
+    responseData = data;
+    res.json = originalJson;
+    return originalJson.call(this, data);
+  };
+  
+  // 拦截 send 方法
   res.send = function(data: any): Response {
     res.send = originalSend;
     
@@ -32,13 +55,56 @@ export function requestLogging(req: Request, res: Response, next: NextFunction):
     const responseTime = Date.now() - (req.startTime || 0);
     
     // 记录响应
-    logger.logResponse(req.requestId!, res.statusCode, responseTime);
+    logger.access(`${req.method} ${req.path} ${res.statusCode}`, {
+      requestId: req.requestId,
+      statusCode: res.statusCode,
+      responseTime,
+      responseData: responseData || data
+    });
     
     // 添加响应头
     res.setHeader('X-Request-ID', req.requestId!);
     res.setHeader('X-Response-Time', `${responseTime}ms`);
     
     return res.send(data);
+  };
+  
+  // 拦截流式响应
+  let chunks: Buffer[] = [];
+  
+  res.write = function(chunk: any, ...args: any[]): boolean {
+    if (chunk) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      // 记录流式数据块
+      logger.debug('流式数据块', {
+        requestId: req.requestId,
+        chunkType: 'write',
+        size: chunks.length
+      });
+    }
+    return originalWrite.apply(res, [chunk, ...args] as any);
+  };
+  
+  res.end = function(chunk?: any, ...args: any[]): Response {
+    if (chunk) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      logger.debug('流式数据结束', {
+        requestId: req.requestId,
+        chunkType: 'end',
+        size: chunks.length
+      });
+    }
+    
+    // 如果是流式响应，记录完整响应
+    if (chunks.length > 0 && !responseData) {
+      const fullResponse = Buffer.concat(chunks).toString();
+      logger.access(`${req.method} ${req.path} ${res.statusCode} [流式响应]`, {
+        requestId: req.requestId,
+        responseData: fullResponse
+      });
+    }
+    
+    return originalEnd.apply(res, [chunk, ...args] as any);
   };
 
   next();
@@ -49,11 +115,15 @@ export function requestLogging(req: Request, res: Response, next: NextFunction):
  */
 export function errorHandling(err: Error, req: Request, res: Response, next: NextFunction): void {
   // 记录错误
-  logger.logError(err, {
+  logger.error('请求处理错误', {
     requestId: req.requestId,
     method: req.method,
     path: req.path,
-    statusCode: res.statusCode
+    statusCode: res.statusCode,
+    error: {
+      message: err.message,
+      stack: err.stack
+    }
   });
 
   // 检查响应是否已经发送

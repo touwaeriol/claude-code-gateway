@@ -1,5 +1,5 @@
-import { SessionManager } from './session-manager';
-import { Tool } from '../types/openai';
+import { SessionManager } from './session-manager.js';
+import { Tool } from '../types/openai-sdk.js';
 
 export interface PermissionCheckResult {
   allowed: boolean;

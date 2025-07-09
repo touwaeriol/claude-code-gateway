@@ -1,8 +1,8 @@
 // Claude Code SDK 类型定义
-import type { Options as SDKOptions, SDKMessage } from '@anthropic-ai/claude-code';
+import type { Options as SDKOptions, SDKMessage, SDKUserMessage, SDKAssistantMessage } from '@anthropic-ai/claude-code';
 
 // 重新导出 SDK 类型
-export type { SDKMessage, SDKOptions };
+export type { SDKMessage, SDKOptions, SDKUserMessage, SDKAssistantMessage };
 export { query } from '@anthropic-ai/claude-code';
 
 // Claude 内置工具列表

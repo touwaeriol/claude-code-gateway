@@ -1,4 +1,4 @@
-import { logger } from '../services/logger';
+import { logger } from '../services/logger.js';
 
 /**
  * 重写 console 方法，使其同时输出到控制台和日志文件
