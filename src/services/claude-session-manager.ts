@@ -1,4 +1,4 @@
-import { SDKMessage } from '../types/claude.js';
+import { SDKMessage } from '../types/claude-code-types.js';
 import { ExtendedChatMessage as ChatMessage } from '../types/openai-sdk.js';
 import { ClaudeService } from './claude-service.js';
 import { ToolCallManager } from './tool-call-manager.js';

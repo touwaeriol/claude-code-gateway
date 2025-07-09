@@ -1,5 +1,5 @@
 import { spawn } from 'child_process';
-import { SDKMessage } from '../types/claude.js';
+import { SDKMessage } from '../types/claude-code-types.js';
 
 /**
  * 包装 Claude Code SDK 的执行，捕获进程输出

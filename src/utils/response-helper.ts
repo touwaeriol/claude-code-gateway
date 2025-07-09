@@ -1,6 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import { ChatCompletionResponse, ChatCompletionChunk, ToolCall, ExtendedChatMessage as ChatMessage } from '../types/openai-sdk.js';
-import { SDKMessage } from '../types/claude.js';
+import { SDKMessage } from '../types/claude-code-types.js';
 import { MCP_CONFIG, RESPONSE_FORMATS } from '../config/constants.js';
 
 /**

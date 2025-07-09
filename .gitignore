@@ -71,3 +71,5 @@ diagnose-*.mjs
 *.js.map
 *.d.ts
 !examples/*.mjs
+# 手动编写的类型定义文件
+!src/types/claude-code-types.d.ts

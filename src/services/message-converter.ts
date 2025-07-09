@@ -1,5 +1,5 @@
 import { ExtendedChatMessage as ChatMessage, Tool, ToolCall } from '../types/openai-sdk.js';
-import { SDKMessage } from '../types/claude.js';
+import { SDKMessage } from '../types/claude-code-types.js';
 
 export class MessageConverter {
   /**

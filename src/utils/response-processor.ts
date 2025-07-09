@@ -1,6 +1,6 @@
 import { Response } from 'express';
 import { ExtendedChatMessage as ChatMessage, ChatCompletionResponse } from '../types/openai-sdk.js';
-import { SDKMessage } from '../types/claude.js';
+import { SDKMessage } from '../types/claude-code-types.js';
 import { ClaudeSessionManager } from '../services/claude-session-manager.js';
 import { MessageTrieCache } from '../services/message-trie-cache.js';
 import { ResponseHelper } from './response-helper.js';

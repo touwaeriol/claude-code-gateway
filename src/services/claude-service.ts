@@ -3,7 +3,7 @@ import {mkdtempSync, rmSync} from 'fs';
 import {join} from 'path';
 import {tmpdir} from 'os';
 
-import {SDKMessage, CLAUDE_BUILTIN_TOOLS} from '../types/claude.js';
+import {SDKMessage, CLAUDE_BUILTIN_TOOLS} from '../types/claude-code-types.js';
 import {Tool, ExtendedChatMessage as ChatMessage} from '../types/openai-sdk.js';
 import {SessionManager} from './session-manager.js';
 import {ToolCallManager} from './tool-call-manager.js';

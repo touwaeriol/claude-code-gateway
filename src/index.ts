@@ -13,7 +13,7 @@ import {
   ToolCall,
   ChatCompletionCreateParams 
 } from './types/openai-sdk.js';
-import { SDKMessage } from './types/claude.js';
+import { SDKMessage } from './types/claude-code-types.js';
 
 // 导入服务
 import { SessionManager } from './services/session-manager.js';
