@@ -208,9 +208,8 @@ export class ClaudeService {
         const mcpServers = this.buildMcpServers(options.sessionId);
         const securityPrompt = this.buildSecurityPrompt(tempDir);
 
-        return {
+        const config: any = {
             model: options.model,
-            maxTurns: REQUEST_LIMITS.MAX_TURNS,  // 使用配置中的值，支持多轮对话
             customSystemPrompt: options.customSystemPrompt,
             appendSystemPrompt: securityPrompt,
             disallowedTools: [...CLAUDE_BUILTIN_TOOLS],
@@ -219,6 +218,10 @@ export class ClaudeService {
             cwd: tempDir,
             abortController: options.abortController
         };
+        
+        // 不设置 maxTurns，让 SDK 使用默认行为
+        
+        return config;
     }
 
     /**
