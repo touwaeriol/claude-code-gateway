@@ -37,7 +37,8 @@ export class ClaudeService {
         private sessionManager: SessionManager,
         private port: number = 3000,
         private toolCallManager?: ToolCallManager
-    ) {}
+    ) {
+    }
 
     /**
      * 查询 Claude
@@ -58,18 +59,18 @@ export class ClaudeService {
      */
     async queryWithSDK(options: QueryOptions): Promise<SDKMessage[]> {
         const messages: SDKMessage[] = [];
-        
+
         for await (const message of this.executeQuery(options)) {
             messages.push(message);
         }
-        
+
         return messages;
     }
 
     /**
      * 使用 SDK 流式查询
      */
-    async *queryWithSDKStream(options: QueryOptions): AsyncGenerator<SDKMessage> {
+    async* queryWithSDKStream(options: QueryOptions): AsyncGenerator<SDKMessage> {
         for await (const message of this.executeQuery(options)) {
             // 只返回 assistant 类型的消息
             if (message.type === 'assistant') {
@@ -81,18 +82,18 @@ export class ClaudeService {
     /**
      * 执行查询的核心逻辑
      */
-    private async *executeQuery(options: QueryOptions): AsyncGenerator<SDKMessage> {
+    private async* executeQuery(options: QueryOptions): AsyncGenerator<SDKMessage> {
         LogHelper.logQueryStart(options.sessionId);
-        
+
         const tempDir = mkdtempSync(join(tmpdir(), `claude-session-${options.sessionId}-`));
 
         try {
             // 获取会话信息
             const session = this.sessionManager.getSession(options.sessionId);
-            
+
             // 构建查询配置
             const queryConfig = this.buildQueryConfig(options, tempDir);
-            
+
             // 记录查询配置
             console.log(`[Claude SDK] 查询配置 - sessionId: ${options.sessionId}:`, JSON.stringify({
                 model: queryConfig.model,
@@ -103,7 +104,7 @@ export class ClaudeService {
                 hasCustomSystemPrompt: !!queryConfig.customSystemPrompt,
                 hasAppendSystemPrompt: !!queryConfig.appendSystemPrompt
             }, null, 2));
-            
+
             // 创建消息流
             const messageConverter = new MessageStreamConverter(options.sessionId);
             const messageStream = messageConverter.convertToSDKStream(options.messages);
@@ -113,21 +114,13 @@ export class ClaudeService {
                 prompt: messageStream,
                 options: queryConfig
             };
-            
-            logger.claudeSDK('开始执行查询', { sessionId: options.sessionId });
-            
+
+            logger.claudeSDK('开始执行查询', options);
+
             // 记录 SDK 调用参数
             SDKErrorCapture.logSDKCall(options.sessionId, queryOptions);
-            
-            // 记录查询到 SDK 日志
-            logger.claudeSDK('查询启动', {
-                sessionId: options.sessionId,
-                model: options.model,
-                messageCount: options.messages.length,
-                maxTurns: queryConfig.maxTurns,
-                hasCustomSystemPrompt: !!queryConfig.customSystemPrompt
-            });
-            
+
+
             // 添加 abort 事件监听
             if (queryConfig.abortController) {
                 queryConfig.abortController.signal.addEventListener('abort', () => {
@@ -135,12 +128,14 @@ export class ClaudeService {
                     console.trace('AbortController 触发调用栈');
                 });
             }
-            
+
             let messageCount = 0;
-            
+
             // 包装 query 函数以便调试
             const query = this.wrapQueryForDebugging(originalQuery);
-            
+
+            // 记录查询到 SDK 日志
+            logger.claudeSDK('查询启动', queryOptions);
             // 直接执行查询，不使用复杂的包装器
             for await (const message of query(queryOptions)) {
                 messageCount++;
@@ -149,28 +144,28 @@ export class ClaudeService {
                     type: message.type,
                     message
                 });
-                
+
                 LogHelper.logMessage(message);
-                
+
                 // SDK 消息已经通过 logger.claudeSDK 记录
-                
+
                 yield message;
             }
-            
+
             logger.claudeSDK('查询完成', {
                 sessionId: options.sessionId,
                 messageCount
             });
-            
+
             // 查询完成已经通过 logger.claudeSDK 记录
         } catch (error) {
             // 特殊处理 Error 143 - 这是 SDK 的已知问题
             if (error instanceof Error && error.message.includes('process exited with code 143')) {
-                logger.claudeSDK('忽略 Error 143 (SIGTERM)', { sessionId: options.sessionId });
+                logger.claudeSDK('忽略 Error 143 (SIGTERM)', {sessionId: options.sessionId});
                 // 不抛出错误，让柢询正常完成
                 return;
             }
-            
+
             logger.error('[Claude SDK] 查询错误', {
                 sessionId: options.sessionId,
                 error: error instanceof Error ? {
@@ -178,26 +173,26 @@ export class ClaudeService {
                     stack: error.stack
                 } : error
             });
-            
+
             // 使用错误捕获器记录详细信息
             if (error instanceof Error) {
                 SDKErrorCapture.captureProcessError(options.sessionId, error);
             }
-            
+
             LogHelper.logError(error, {
                 sessionId: options.sessionId,
                 model: options.model,
                 messageCount: options.messages?.length,
                 hasLongConversation: options.messages?.length > 50
             });
-            
+
             // 错误已经通过 logger.error 记录
             throw error;
         } finally {
-            logger.claudeSDK('清理资源', { sessionId: options.sessionId });
-            
+            logger.claudeSDK('清理资源', {sessionId: options.sessionId});
+
             // 清理事件已经通过 logger.claudeSDK 记录
-            
+
             this.cleanup(options.sessionId, tempDir);
         }
     }
@@ -219,9 +214,9 @@ export class ClaudeService {
             cwd: tempDir,
             abortController: options.abortController
         };
-        
+
         // 不设置 maxTurns，让 SDK 使用默认行为
-        
+
         return config;
     }
 
@@ -233,12 +228,12 @@ export class ClaudeService {
             auth: {
                 type: 'http' as const,
                 url: `http://localhost:${this.port}/mcp/permission`,
-                headers: { 'X-Session-ID': sessionId }
+                headers: {'X-Session-ID': sessionId}
             },
             gateway: {
                 type: 'http' as const,
                 url: `http://localhost:${this.port}/mcp/gateway`,
-                headers: { 'X-Session-ID': sessionId }
+                headers: {'X-Session-ID': sessionId}
             }
         };
     }
@@ -258,14 +253,14 @@ IMPORTANT SECURITY RESTRICTIONS:
      */
     private cleanup(sessionId: string, tempDir: string): void {
         LogHelper.logSessionEnd(sessionId);
-        
+
         if (this.toolCallManager) {
             this.toolCallManager.cancelSessionToolCalls(sessionId);
         }
-        
-        rmSync(tempDir, { recursive: true, force: true });
+
+        rmSync(tempDir, {recursive: true, force: true});
     }
-    
+
     /**
      * 包装 query 函数以便调试和捕获输出
      */
@@ -280,7 +275,7 @@ IMPORTANT SECURITY RESTRICTIONS:
                 disallowedTools: options.options?.disallowedTools,
                 permissionPromptToolName: options.options?.permissionPromptToolName
             }, null, 2));
-            
+
             try {
                 for await (const message of query(options)) {
                     console.log('[Claude SDK 调试] 原始消息:', JSON.stringify(message, null, 2));
