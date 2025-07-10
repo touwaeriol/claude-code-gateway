@@ -392,19 +392,72 @@ class ClaudeCodeGateway {
 
 
   private handleModels(req: Request, res: Response): void {
+    const modelMetadata = {
+      'custom-claude-4-sonnet': {
+        description: 'Claude 3.5 Sonnet (via Claude Code SDK)',
+        context_window: 200000,
+        max_output_tokens: 8192,
+        training_data_cutoff: '2024-04'
+      },
+      'custom-claude-4-opus': {
+        description: 'Claude 3 Opus (via Claude Code SDK)',
+        context_window: 200000,
+        max_output_tokens: 8192,
+        training_data_cutoff: '2024-04'
+      }
+    };
+
     const models = MODEL_CONFIG.SUPPORTED_MODELS
       .filter(id => id.startsWith('custom-'))
-      .map(id => ({
-        id,
-        object: 'model',
-        created: Date.now() / 1000,
-        owned_by: 'custom',
-        permission: [],
-        root: id,
-        parent: null
-      }));
+      .map(id => {
+        const metadata = modelMetadata[id as keyof typeof modelMetadata];
+        return {
+          id,
+          object: 'model',
+          created: Math.floor(Date.now() / 1000),
+          owned_by: 'claude-code-gateway',
+          // OpenAI 标准字段
+          permission: [{
+            id: `modelperm-${id}`,
+            object: 'model_permission',
+            created: Math.floor(Date.now() / 1000),
+            allow_create_engine: false,
+            allow_sampling: true,
+            allow_logprobs: false,  // Claude 不支持 logprobs
+            allow_search_indices: false,
+            allow_view: true,
+            allow_fine_tuning: false,
+            organization: '*',
+            group: null,
+            is_blocking: false
+          }],
+          root: id,
+          parent: null,
+          // 添加模型能力和限制
+          context_window: metadata?.context_window || 200000,
+          max_tokens: metadata?.max_output_tokens || 8192,
+          training_data: metadata?.training_data_cutoff || 'unknown',
+          // 模型能力
+          capabilities: {
+            fine_tune: false,
+            inference: true,
+            completion: false,  // 只支持 chat completion
+            chat_completion: true,
+            embeddings: false,
+            function_calling: true,  // 支持工具调用
+            vision: true  // Claude 支持图像输入
+          },
+          lifecycle_status: 'generally-available',
+          status: 'succeeded',
+          // 额外信息
+          description: metadata?.description || id
+        };
+      });
     
-    res.json({ object: 'list', data: models });
+    res.json({ 
+      object: 'list', 
+      data: models 
+    });
   }
 
   private async handlePermissionCheck(req: Request, res: Response): Promise<void> {

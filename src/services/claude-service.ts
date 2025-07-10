@@ -249,11 +249,7 @@ export class ClaudeService {
     private buildSecurityPrompt(tempDir: string): string {
         return `
 IMPORTANT SECURITY RESTRICTIONS:
-1. You MUST ONLY use MCP tools that start with these prefixes: "mcp__auth__" or "mcp__gateway__".
-2. You MUST NOT access, read, write, or interact with any files outside of: ${tempDir}
-3. The working directory ${tempDir} is a clean, empty directory created for this session.
-4. Any file operations should be performed within this temporary directory only.
-5. Do not attempt to access the original cwd directory or any parent directories.`;
+1. If you need to use any tools, you may ONLY use MCP tools that start with these prefixes: "mcp__auth__" or "mcp__gateway__".`;
     }
 
 
