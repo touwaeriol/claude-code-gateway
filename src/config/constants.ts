@@ -32,7 +32,7 @@ export const TIMEOUT_CONFIG = {
 // 请求限制
 export const REQUEST_LIMITS = {
     JSON_LIMIT: '10mb',
-    MAX_TURNS: 1
+    MAX_TURNS: 10  // 增加到 10 轮，允许多次工具调用往返
 } as const;
 
 // MCP 配置

@@ -8,6 +8,7 @@ import {Tool, ExtendedChatMessage as ChatMessage} from '../types/openai-sdk.js';
 import {SessionManager} from './session-manager.js';
 import {ToolCallManager} from './tool-call-manager.js';
 import {MessageStreamConverter} from './message-stream-converter.js';
+import {REQUEST_LIMITS} from '../config/constants.js';
 import {LogHelper} from '../utils/log-helper.js';
 import {ClaudeSDKWrapper} from '../utils/claude-sdk-wrapper.js';
 import {SDKErrorCapture} from '../utils/sdk-error-capture.js';
@@ -209,7 +210,7 @@ export class ClaudeService {
 
         return {
             model: options.model,
-            maxTurns: 1,
+            maxTurns: REQUEST_LIMITS.MAX_TURNS,  // 使用配置中的值，支持多轮对话
             customSystemPrompt: options.customSystemPrompt,
             appendSystemPrompt: securityPrompt,
             disallowedTools: [...CLAUDE_BUILTIN_TOOLS],

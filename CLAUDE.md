@@ -348,3 +348,8 @@ CLAUDE_SDK_LOG_LEVEL=info          # SDK 日志级别
 - [实现决策记录](docs/implementation-decisions.md)
 - [架构总结](docs/architecture-summary.md)
 - [流式工具响应设计](docs/streaming-tool-response.md)
+
+现在，我们调用claude code sdk 时似乎都是maxTurns = 1,其实我们不需要 maxTurns = 1，这个maxTurns = 1 是指claude code sdk 只返回一个消息吧？在一个 claude code sdk
+查询期间，我们可能通过虚拟mcp多次进行工具调用，但是这时候每次工具调用都需要返回给客户端处理，对于客户端来说使用无状态的http创建了多个请求，但是对于claude code sdk 来说仍然是一个查询，返回时根据 messages 快照做了缓存，下次客户继续使用相同的前缀的消息来查询时就能查询到缓存，然后根据缓存 找到
+claude
+code sdk 会话，返回虚拟mcp 调用结果，次情况针对claude code sdk 需要进行工具调用的情况，你理解，评估合理性，如果完美，检查相关文档是否符合描述，代码进行修改
