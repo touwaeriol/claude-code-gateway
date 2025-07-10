@@ -4,7 +4,7 @@
 
 Claude Code OpenAI 代理服务 - 提供 OpenAI 兼容的 API 接口，底层使用 Claude Code SDK，支持完整的工具调用（Function Calling）功能。
 
-**项目状态：✅ 生产就绪**（版本：v2.0.0，完成度：100%）
+**项目状态：✅ 生产就绪**（版本：v2.0.2，完成度：100%）
 
 该项目已完全实现所有核心功能，包括：
 - 完整的 OpenAI API 兼容性
@@ -13,62 +13,23 @@ Claude Code OpenAI 代理服务 - 提供 OpenAI 兼容的 API 接口，底层使
 - 完善的权限控制和安全审计
 - 生产级别的监控和日志系统
 
-## 项目文档索引
+## 项目文档
 
-### 1. 架构和技术文档
+### 📖 文档导航入口
+- **[文档中心](docs/README.md)** - 所有文档的统一入口，包含快速导航和分类索引
 
-- **[系统架构](docs/ARCHITECTURE.md)**
-    - 完整的系统架构设计
-    - 核心组件职责分工
-    - 双 MCP 服务器架构
-    - 安全架构和权限控制
+### 📚 核心文档（5篇必读）
+1. **[项目概览](docs/OVERVIEW.md)** - 了解项目价值和功能
+2. **[系统架构](docs/ARCHITECTURE.md)** - 理解系统设计
+3. **[工具调用流程](docs/tool-call-flow.md)** - 掌握核心流程
+4. **[安全设计](docs/SECURITY.md)** - 了解安全架构
+5. **[Claude Code SDK 指南](docs/CLAUDE_CODE_SDK.md)** - SDK 使用说明
 
-- **[Claude Code SDK 使用指南](docs/CLAUDE_CODE_SDK.md)**
-    - SDK 完整使用指南
-    - 工具控制和权限管理
-    - 认证配置和最佳实践
-
-- **[安全设计](docs/SECURITY.md)**
-    - 零信任安全架构
-    - 权限控制方案
-    - 审计日志和监控
-
-- **[工具调用流程](docs/tool-call-flow.md)**
-    - 完整的工具调用流程
-    - MCP 协议实现细节
-    - 客户端操作指南
-
-- **[日志系统](docs/logging.md)**
-    - 统一日志系统使用
-    - 多种日志类型和格式
-    - 日志最佳实践
-
-- **[架构总结](docs/architecture-summary.md)**
-    - 系统架构简明总结
-    - 核心组件和数据流
-    - 资源管理机制
-
-- **[实现决策](docs/implementation-decisions.md)**
-    - 重要技术决策记录
-    - 设计理由和影响分析
-    - 实现细节说明
-
-### 2. 用户指南
-
-- **[项目概览](docs/OVERVIEW.md)**
-    - 项目概述和核心特性
-    - 快速开始指南
-    - 典型使用场景
-
-- **[文档导航](docs/README.md)**
-    - 所有文档的导航入口
-    - 针对不同角色的阅读指南
-    - 文档维护和更新机制
-
-- **[流式工具响应](docs/streaming-tool-response.md)**
-    - 流式工具响应设计
-    - AsyncGenerator 实现
-    - 客户端处理指南
+### 🔧 技术文档（选读）
+- [多工具调用处理](docs/multi-tool-call-handling.md) - SDK 行为分析
+- [日志系统](docs/logging.md) - 统一日志方案
+- [实现决策](docs/implementation-decisions.md) - 技术决策记录
+- 更多文档请查看[文档中心](docs/README.md)
 
 ### 3. 核心代码模块
 
@@ -349,7 +310,42 @@ CLAUDE_SDK_LOG_LEVEL=info          # SDK 日志级别
 - [架构总结](docs/architecture-summary.md)
 - [流式工具响应设计](docs/streaming-tool-response.md)
 
-现在，我们调用claude code sdk 时似乎都是maxTurns = 1,其实我们不需要 maxTurns = 1，这个maxTurns = 1 是指claude code sdk 只返回一个消息吧？在一个 claude code sdk
-查询期间，我们可能通过虚拟mcp多次进行工具调用，但是这时候每次工具调用都需要返回给客户端处理，对于客户端来说使用无状态的http创建了多个请求，但是对于claude code sdk 来说仍然是一个查询，返回时根据 messages 快照做了缓存，下次客户继续使用相同的前缀的消息来查询时就能查询到缓存，然后根据缓存 找到
-claude
-code sdk 会话，返回虚拟mcp 调用结果，次情况针对claude code sdk 需要进行工具调用的情况，你理解，评估合理性，如果完美，检查相关文档是否符合描述，代码进行修改
+## 更新日志
+
+### v2.0.2 (2025-01-10)
+- **新功能**: 客户端断开连接处理
+  - 检测客户端主动断开连接（流式和非流式响应）
+  - 自动终止相关的 Claude Code SDK 会话
+  - 释放系统资源，避免内存泄漏
+  - 详见 [客户端断开处理文档](docs/client-disconnect-handling.md)
+- **发现**: Claude Code SDK 消息流特性
+  - SDK 使用流式传输，`stop_reason` 在传输过程中通常为 `null`
+  - 通过 `result` 消息类型判断 SDK 是否完成当前轮次
+  - SDK 一次只返回一个工具调用，需要客户端返回结果后才会继续
+  - 更新了多工具调用处理文档，明确了 SDK 的实际行为
+- **修复**: 多工具调用支持
+  - 正确处理 SDK 返回的多个工具调用
+  - 支持混合响应（文本 + 工具调用）
+  - 改进消息缓存机制，创建包含所有工具调用的快照
+  - 利用 `stop_reason` 字段精确判断 SDK 状态
+  - 详见 [多工具调用处理文档](docs/multi-tool-call-handling.md)
+- **决策**: 不支持 maxTurns 参数
+  - 保持严格的 OpenAI API 兼容性
+  - OpenAI API 规范中没有对话轮数控制参数
+  - 此类控制应在客户端应用层实现
+
+### v2.0.1 (2025-01-10)
+- **优化**: 移除重复的 `CLAUDE_BUILTIN_TOOLS` 定义
+  - 将常量定义保留在 `/src/config/claude-tools.ts`（运行时使用）
+  - 类型定义文件 `/src/types/claude-code-types.d.ts` 只保留类型声明
+  - 符合 TypeScript 最佳实践：`.d.ts` 文件不应包含运行时值
+- **改进**: 移除 `maxTurns = 1` 限制
+  - 允许 Claude Code SDK 在单个会话中执行多轮对话
+  - 支持复杂的多工具调用场景
+  - 提升了会话的连续性和灵活性
+
+### v2.0.0 (2025-01-09)
+- 项目完全重构为 TypeScript
+- 实现完整的生产级功能
+- 添加 Trie 树消息缓存机制
+- 实现零信任安全架构

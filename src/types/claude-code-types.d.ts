@@ -34,9 +34,9 @@ declare module '@anthropic-ai/claude-code' {
     export interface SDKMessage {
         type: 'user' | 'assistant' | 'progress';
         message?: MessageParam | ClaudeMessage;
-        parent_tool_use_id: string | null;
+        parent_tool_use_id?: string | null; // 经常为 null，标记为可选
         session_id: string;
-        // 可选的元数据字段
+        // 可选的元数据字段 - 根据实际使用情况调整
         parentUuid?: string | null;
         isSidechain?: boolean;
         userType?: string;
@@ -72,8 +72,9 @@ declare module '@anthropic-ai/claude-code' {
         role: 'assistant';
         model: string;
         content: ContentBlock[];
-        stop_reason: 'end_turn' | 'max_tokens' | 'stop_sequence' | 'tool_use' | null;
-        stop_sequence: string | null;
+        // 根据日志分析，这些字段经常为 null，标记为可选
+        stop_reason?: 'end_turn' | 'max_tokens' | 'stop_sequence' | 'tool_use' | null;
+        stop_sequence?: string | null;
         usage: {
             input_tokens: number;
             output_tokens: number;
@@ -121,15 +122,45 @@ declare module '@anthropic-ai/claude-code' {
     // 系统消息类型（如会话开始/结束）
     export interface SDKSystemMessage {
         type: 'system';
-        event: 'session_start' | 'session_end' | 'tool_permission_request' | 'tool_permission_response';
+        subtype?: 'init';
+        event?: 'session_start' | 'session_end' | 'tool_permission_request' | 'tool_permission_response';
         data?: any;
         session_id: string;
         uuid?: string;
         timestamp?: string;
+        cwd?: string;
+        tools?: string[];
+        mcp_servers?: Array<{ name: string; status: string }>;
+        model?: string;
+    }
+    
+    // 结果消息类型（标志 SDK 完成当前轮次）
+    export interface SDKResultMessage {
+        type: 'result';
+        subtype: 'success' | 'error_max_turns' | 'error_during_execution';
+        is_error: boolean;
+        duration_ms: number;
+        duration_api_ms?: number;
+        num_turns?: number;
+        result?: string; // 只有 subtype 为 'success' 时才有
+        session_id: string;
+        total_cost_usd?: number;
+        usage?: {
+            input_tokens: number;
+            output_tokens: number;
+            cache_creation_input_tokens?: number;
+            cache_read_input_tokens?: number;
+            server_tool_use?: any;
+            service_tier?: string;
+        };
+        error?: {
+            message: string;
+            code?: string;
+        };
     }
 
     // 扩展的完整消息类型
-    export type SDKFullMessage = SDKMessage | SDKErrorMessage | SDKSystemMessage;
+    export type SDKFullMessage = SDKMessage | SDKErrorMessage | SDKSystemMessage | SDKResultMessage;
 
     export function query(options: Options): AsyncGenerator<SDKMessage>;
 
@@ -164,30 +195,31 @@ declare module '@anthropic-ai/claude-code' {
     }
 }
 
-// ========== 导出常量和类型 ==========
+// ========== 导出类型 ==========
 
-// Claude 内置工具列表
-export const CLAUDE_BUILTIN_TOOLS = [
-    'Bash',
-    'Edit',
-    'Write',
-    'Read',
-    'Search',
-    'Grep',
-    'Glob',
-    'LS',
-    'TodoRead',
-    'TodoWrite',
-    'NotebookRead',
-    'NotebookEdit',
-    'WebFetch',
-    'WebSearch',
-    'MultiEdit',
-    'Task',
-    'exit_plan_mode'
-] as const;
-
-export type ClaudeBuiltinTool = typeof CLAUDE_BUILTIN_TOOLS[number];
+/**
+ * Claude 内置工具类型
+ * 注意：实际的常量数组定义在 /src/config/claude-tools.ts
+ * 这里只提供类型定义，避免在 .d.ts 文件中定义运行时值
+ */
+export type ClaudeBuiltinTool = 
+    | 'Bash'
+    | 'Edit'
+    | 'Write'
+    | 'Read'
+    | 'Search'
+    | 'Grep'
+    | 'Glob'
+    | 'LS'
+    | 'TodoRead'
+    | 'TodoWrite'
+    | 'NotebookRead'
+    | 'NotebookEdit'
+    | 'WebFetch'
+    | 'WebSearch'
+    | 'MultiEdit'
+    | 'Task'
+    | 'exit_plan_mode';
 
 // 从 @anthropic-ai/claude-code 重新导出常用类型
 export type {
@@ -203,6 +235,7 @@ export type {
     ToolResultBlock,
     SDKErrorMessage,
     SDKSystemMessage,
+    SDKResultMessage,
     SDKFullMessage,
     MessageParam,
     HasToolUse,

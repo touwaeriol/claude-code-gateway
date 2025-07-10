@@ -43,6 +43,7 @@ import { RequestValidator } from './utils/request-validator.js';
 import { ProcessMonitor } from './utils/process-monitor.js';
 import { SDKOutputCapture } from './utils/sdk-output-capture.js';
 import { SERVER_CONFIG, MODEL_CONFIG, TIMEOUT_CONFIG, REQUEST_LIMITS, RESPONSE_FORMATS } from './config/constants.js';
+import { SEQUENTIAL_TOOL_CONFIG } from './config/sequential-tool-config.js';
 import { ConsoleLogger } from './utils/console-logger.js';
 import { createLogger } from './utils/unified-logger.js';
 
@@ -166,6 +167,20 @@ class ClaudeCodeGateway {
     res: Response
   ): Promise<void> {
     let processedRequest: any;
+    let isClientDisconnected = false;
+    let sessionId: string | undefined;
+    
+    // 监听客户端断开
+    req.on('close', () => {
+      if (!res.headersSent) {
+        isClientDisconnected = true;
+        console.log(`[API] 客户端断开连接 - requestId: ${processedRequest?.requestId}, sessionId: ${sessionId}`);
+        // 如果有会话ID，终止会话
+        if (sessionId) {
+          this.claudeSessionManager.abortSession(sessionId, SEQUENTIAL_TOOL_CONFIG.DEFAULT_MESSAGES.CLIENT_DISCONNECTED);
+        }
+      }
+    });
     
     try {
       // 详细记录请求信息
@@ -194,6 +209,9 @@ class ClaudeCodeGateway {
         this.toolCallManager,
         this.claudeSessionManager
       );
+      
+      // 保存会话ID以便在客户端断开时使用
+      sessionId = sessionContext.sessionId;
 
       // 如果需要继续原会话
       if (sessionContext.shouldContinue) {
@@ -232,6 +250,7 @@ class ClaudeCodeGateway {
       // 处理响应
       await this.processResponse({
         res,
+        req,
         conversationMessages,
         messages,
         model,
@@ -268,6 +287,7 @@ class ClaudeCodeGateway {
 
   private async processResponse(options: {
     res: Response;
+    req: Request<{}, any, ChatCompletionCreateParams>;
     conversationMessages: ExtendedChatMessage[];
     messages: ExtendedChatMessage[];
     model: string;
@@ -278,6 +298,9 @@ class ClaudeCodeGateway {
     customSystemPrompt?: string;
     stream: boolean;
   }): Promise<void> {
+    // 检查是否为串行工具调用客户端（根据 parallel_tool_calls 参数）
+    const isSequentialClient = this.isSequentialClient(options.req);
+    
     const responseOptions = {
       conversationMessages: options.conversationMessages,
       messages: options.messages,
@@ -286,8 +309,17 @@ class ClaudeCodeGateway {
       sessionId: options.sessionId,
       requestId: options.requestId,
       abortController: options.abortController,
-      customSystemPrompt: options.customSystemPrompt
+      customSystemPrompt: options.customSystemPrompt,
+      isSequentialClient
     };
+
+    // 检查是否是串行工具调用的继续请求
+    if (this.isSequentialToolContinuation(options.messages) && isSequentialClient) {
+      console.log(`[主服务] 检测到串行工具调用继续请求 - sessionId: ${options.sessionId}`);
+      const response = await this.responseProcessor.processSequentialToolResult(responseOptions);
+      options.res.json(response);
+      return;
+    }
 
     if (options.stream) {
       await this.responseProcessor.processStream(options.res, responseOptions);
@@ -295,6 +327,42 @@ class ClaudeCodeGateway {
       const response = await this.responseProcessor.processNonStream(responseOptions);
       options.res.json(response);
     }
+  }
+
+  /**
+   * 判断是否为串行工具调用客户端
+   */
+  private isSequentialClient(req: Request<{}, any, ChatCompletionCreateParams>): boolean {
+    // 直接使用类型化的 parallel_tool_calls 参数
+    const parallelToolCalls = req.body.parallel_tool_calls;
+    
+    // 如果明确设置了 parallel_tool_calls: false，则使用串行模式
+    // 默认值为 true（支持并行），所以只有 false 时才是串行模式
+    if (parallelToolCalls === false) {
+        console.log('[API] 检测到 parallel_tool_calls: false，使用串行模式');
+        return true;
+    }
+    
+    // 其他情况都使用并行模式（包括未设置该参数的情况）
+    return false;
+  }
+
+  /**
+   * 判断是否为串行工具调用的继续请求
+   */
+  private isSequentialToolContinuation(messages: ExtendedChatMessage[]): boolean {
+    if (messages.length < 2) return false;
+    
+    // 查找最后两条消息
+    const lastMessage = messages[messages.length - 1];
+    const secondLastMessage = messages[messages.length - 2];
+    
+    // 检查模式：assistant(工具调用) -> tool(结果)
+    return secondLastMessage.role === SEQUENTIAL_TOOL_CONFIG.MESSAGE_ROLES.ASSISTANT &&
+           !!secondLastMessage.tool_calls &&
+           secondLastMessage.tool_calls.length > 0 &&
+           lastMessage.role === SEQUENTIAL_TOOL_CONFIG.MESSAGE_ROLES.TOOL &&
+           !!lastMessage.tool_call_id;
   }
 
 

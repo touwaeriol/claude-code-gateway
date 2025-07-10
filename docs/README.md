@@ -1,68 +1,80 @@
-# Claude Code Gateway 文档
+# Claude Code Gateway 文档中心
 
-## 文档结构
+## 🎯 根据需求快速定位
 
-### 📚 核心文档
+### 我想了解项目
+→ 阅读 **[项目概览](OVERVIEW.md)** 和 **[系统架构](ARCHITECTURE.md)**
 
-#### 1. [项目概述](./OVERVIEW.md) 
-- 项目介绍和背景
-- 核心特性和优势
-- 快速开始指南
-- 典型使用场景
+### 我要部署系统
+→ 参考 **[快速开始](../README.md#快速开始)** 和 **[Claude Code SDK 指南](CLAUDE_CODE_SDK.md)**
 
-#### 2. [架构设计](./ARCHITECTURE.md) 
-- 系统架构图
-- 核心组件详解
-- 消息流转机制
-- 数据转换逻辑
-- MCP 统一端口设计
-- 技术决策说明
+### 我要集成 API
+→ 查看 **[工具调用流程](tool-call-flow.md)** 和 **[API 端点](../README.md#api-端点总览)**
 
-#### 3. [安全指南](./SECURITY.md) 
-- 权限控制方案（基于 --permission-prompt-tool）
-- 工具访问管理策略
-- 审计和监控系统
-- 安全最佳实践
-- 应急响应流程
+### 我关注安全性
+→ 重点阅读 **[安全设计](SECURITY.md)**
 
-#### 4. [SDK 参考](./CLAUDE_CODE_SDK.md)
-- Claude Code SDK 完整指南
-- query 函数参数详解
-- TypeScript/Python 示例
-- 工具控制参数说明
-- 注意事项和限制
+## 📚 核心文档（5篇必读）
 
-### 🚧 待完善文档
+1. **[项目概览](OVERVIEW.md)** ⭐
+   - 了解项目的价值和功能
 
-- **API 参考文档** - OpenAI 兼容接口的详细说明
-- **部署指南** - 生产环境部署和运维指南
-- **客户端集成** - 各种编程语言的集成示例
+2. **[系统架构](ARCHITECTURE.md)** ⭐
+   - 理解系统设计和组件
+
+3. **[工具调用流程](tool-call-flow.md)** ⭐
+   - 掌握核心业务流程
+
+4. **[安全设计](SECURITY.md)** ⭐
+   - 了解安全架构
+
+5. **[Claude Code SDK 指南](CLAUDE_CODE_SDK.md)** ⭐
+   - SDK 集成和配置
+
+## 🔧 技术实现文档
+
+### 功能实现
+- [多工具调用处理](multi-tool-call-handling.md) - SDK 工具调用行为分析
+- [会话管理机制](session-management.md) - 会话生命周期
+- [流式工具响应](streaming-tool-response.md) - 流式响应设计
+- [串行工具调用](sequential-tool-calls.md) - 串行处理方案
+
+### 系统集成
+- [日志系统](logging.md) - 统一日志方案
+- [客户端断开处理](client-disconnect-handling.md) - 连接管理
+- [实现决策](implementation-decisions.md) - 技术决策记录
+
+### 简化文档
+- [架构总结](architecture-summary.md) - 架构要点总结
+
+## 📊 文档地图
+
+```
+必读文档（5篇）
+├── 项目概览 → 系统架构 → 工具调用流程
+└── 安全设计 + SDK指南
+
+技术文档（8篇）
+├── 功能实现（4篇）
+├── 系统集成（3篇）
+└── 简化总结（1篇）
+```
 
 ## 🚀 快速导航
 
-根据您的角色和需求：
+| 我是... | 我应该看... |
+|---------|------------|
+| **新用户** | 项目概览 → 系统架构 |
+| **开发者** | 工具调用流程 + SDK指南 |
+| **运维人员** | 安全设计 + 日志系统 |
+| **架构师** | 全部核心文档 |
 
-| 角色 | 推荐阅读 |
-|------|----------|
-| **产品/业务** | [项目概述](./OVERVIEW.md) |
-| **开发工程师** | [架构设计](./ARCHITECTURE.md) + [SDK 参考](./CLAUDE_CODE_SDK.md) |
-| **安全工程师** | [安全指南](./SECURITY.md) |
-| **架构师** | [架构设计](./ARCHITECTURE.md) + [安全指南](./SECURITY.md) |
-| **新手入门** | [项目概述](./OVERVIEW.md) → [架构设计](./ARCHITECTURE.md) |
+## 📝 文档说明
 
-## 🔗 相关资源
-
-- [Claude Code 官方文档](https://docs.anthropic.com/en/docs/claude-code)
-- [Claude Code SDK 文档](https://docs.anthropic.com/en/docs/claude-code/sdk)
-- [OpenAI API 规范](https://platform.openai.com/docs/api-reference)
-- [项目 GitHub](https://github.com/your-org/claude-code-gateway)
-
-## 📝 文档维护
-
-- 文档会随项目发展持续更新
-- 如有问题或建议，请提交 Issue
-- 欢迎贡献 PR 改进文档
+- **⭐ 标记**：核心必读文档
+- **更新频率**：随代码更新同步维护
+- **总计文档**：13篇（5篇核心 + 8篇技术）
 
 ---
 
-*最后更新：2025-07-05*
+*最后更新：2025-01-10*

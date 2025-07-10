@@ -81,23 +81,45 @@ export class ClaudeSessionManager {
       customSystemPrompt
     });
     
+    let hasToolCalls = false;
+    
     for await (const message of messageStream) {
       session.pendingMessages.push(message);
       session.lastActivity = Date.now();
       
       // 检测工具调用
-      if (message.type === 'assistant' && message.message && message.message.content) {
-        const content = message.message.content;
-        if (Array.isArray(content)) {
-          for (const block of content) {
+      if (message.type === 'assistant' && message.message) {
+        const claudeMessage = message.message as any;
+        
+        if (Array.isArray(claudeMessage.content)) {
+          for (const block of claudeMessage.content) {
             if (block.type === 'tool_use' && block.name.startsWith('mcp__gateway__')) {
-              session.isWaitingForTool = true;
+              hasToolCalls = true;
             }
           }
         }
+        
+        // 如果收到 stop_reason: "tool_use"，说明 SDK 在等待工具结果
+        if (claudeMessage.stop_reason === 'tool_use') {
+          session.isWaitingForTool = true;
+          console.log(`会话 ${sessionId} 收到 stop_reason: "tool_use"，等待工具调用结果`);
+          // 不需要 break，因为我们还需要继续 yield 消息
+        }
+      }
+      
+      // 检测 result 消息
+      if (message.type === 'result') {
+        // SDK 完成了当前轮次，不再等待
+        session.isWaitingForTool = false;
       }
       
       yield message;
+    }
+    
+    // 如果有工具调用但没有收到 result 消息，说明 SDK 在等待工具结果
+    if (hasToolCalls && !session.pendingMessages.some(m => m.type === 'result')) {
+      session.isWaitingForTool = true;
+      console.log(`会话 ${sessionId} 正在等待工具调用结果`);
     }
   }
   
@@ -145,13 +167,20 @@ export class ClaudeSessionManager {
   }
   
   /**
-   * 终止会话
+   * 终止会话（仅在客户端断开时调用）
    */
-  abortSession(sessionId: string): void {
+  abortSession(sessionId: string, reason?: string): void {
     const session = this.sessions.get(sessionId);
     if (session) {
-      console.log(`终止会话 ${sessionId}`);
-      // session.abortController.abort();
+      console.log(`终止会话 ${sessionId} - 原因: ${reason || '未指定'}`);
+      
+      // 如果会话正在等待工具调用，通知工具管理器
+      if (session.isWaitingForTool) {
+        this.toolCallManager.cancelSessionToolCalls(sessionId);
+      }
+      
+      // 终止 Claude Code SDK 进程
+      session.abortController.abort();
       this.sessions.delete(sessionId);
     }
   }
